@@ -28,7 +28,7 @@ solveRouter.post(
   celebrate({ [Segments.BODY]: solveSchema }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await logRequest(req.body);
+      logRequest(req.body).catch((err) => console.error('[LOG ERROR]', err));
       await solveService.solve(req.body as SolveRequestBody);
       res.json({ status: 'completed' });
     } catch (err) {
