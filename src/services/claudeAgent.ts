@@ -213,6 +213,18 @@ export async function runAgent(
       })
     );
 
+    // Abort immediately on auth failure — no point retrying with bad credentials
+    const hasAuthFailure = toolResults.some((r) => {
+      try {
+        const parsed = JSON.parse(r.content as string) as { status_code?: number };
+        return parsed.status_code === 401 || parsed.status_code === 403;
+      } catch { return false; }
+    });
+    if (hasAuthFailure) {
+      console.log('[AGENT] Auth failure detected — aborting loop');
+      break;
+    }
+
     messages.push({ role: 'user', content: toolResults });
   }
 }
