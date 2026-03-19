@@ -21,6 +21,7 @@ const solveSchema = Joi.object({
     base_url: Joi.string().uri().required(),
     session_token: Joi.string().required(),
   }).required(),
+  use_sandbox: Joi.boolean().optional(),
 });
 
 solveRouter.post(
@@ -29,8 +30,8 @@ solveRouter.post(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       logRequest(req.body).catch((err) => console.error('[LOG ERROR]', err));
-      await solveService.solve(req.body as SolveRequestBody);
-      res.json({ status: 'completed' });
+      const result = await solveService.solve(req.body as SolveRequestBody);
+      res.json(result);
     } catch (err) {
       next(err);
     }

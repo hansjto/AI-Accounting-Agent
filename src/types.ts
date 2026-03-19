@@ -13,4 +13,5 @@ export interface SolveRequestBody {
   prompt: string;
   files?: FileAttachment[];
   tripletex_credentials: TripletexCredentials;
+  use_sandbox?: boolean;
 }

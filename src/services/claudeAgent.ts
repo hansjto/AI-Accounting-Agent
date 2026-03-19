@@ -156,11 +156,17 @@ async function executeTool(
 // Main agent
 // ---------------------------------------------------------------------------
 
+export interface AgentResult {
+  toolCallCount: number;
+  errors: Array<{ tool: string; status: number }>;
+  messages: Anthropic.MessageParam[];
+}
+
 export async function runAgent(
   prompt: string,
   credentials: TripletexCredentials,
   imageAttachments: Array<{ mimeType: string; data: string }> = []
-): Promise<void> {
+): Promise<AgentResult> {
   const content: Anthropic.MessageParam['content'] = [];
 
   for (const img of imageAttachments) {
@@ -176,8 +182,9 @@ export async function runAgent(
   content.push({ type: 'text', text: prompt });
 
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content }];
-
   const systemPrompt = buildSystemPrompt(prompt);
+  let toolCallCount = 0;
+  const errors: AgentResult['errors'] = [];
 
   // Agentic loop
   while (true) {
@@ -199,12 +206,23 @@ export async function runAgent(
 
     if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) break;
 
+    toolCallCount += toolUseBlocks.length;
+
     // Execute all tool calls in parallel
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
       toolUseBlocks.map(async (block) => {
         console.log(`[TOOL] ${block.name} ${JSON.stringify(block.input)}`);
         const result = await executeTool(block.name, block.input as Record<string, unknown>, credentials);
         console.log(`[TOOL RESULT] ${block.name} → ${result.slice(0, 200)}`);
+
+        // Track non-2xx responses
+        try {
+          const parsed = JSON.parse(result) as { status_code?: number };
+          if (parsed.status_code && parsed.status_code >= 400) {
+            errors.push({ tool: block.name, status: parsed.status_code });
+          }
+        } catch { /* ignore parse errors */ }
+
         return {
           type: 'tool_result' as const,
           tool_use_id: block.id,
@@ -214,12 +232,7 @@ export async function runAgent(
     );
 
     // Abort immediately on auth failure — no point retrying with bad credentials
-    const hasAuthFailure = toolResults.some((r) => {
-      try {
-        const parsed = JSON.parse(r.content as string) as { status_code?: number };
-        return parsed.status_code === 401 || parsed.status_code === 403;
-      } catch { return false; }
-    });
+    const hasAuthFailure = errors.some((e) => e.status === 401 || e.status === 403);
     if (hasAuthFailure) {
       console.log('[AGENT] Auth failure detected — aborting loop');
       break;
@@ -227,4 +240,36 @@ export async function runAgent(
 
     messages.push({ role: 'user', content: toolResults });
   }
+
+  return { toolCallCount, errors, messages };
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox verification — asks Claude to summarise what happened
+// ---------------------------------------------------------------------------
+
+export async function verifySandboxResult(
+  prompt: string,
+  result: AgentResult
+): Promise<{ verified: boolean; summary: string }> {
+  const response = await claude.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 512,
+    system: 'You are verifying whether an accounting task was completed successfully in Tripletex. Be concise.',
+    messages: [
+      ...result.messages,
+      {
+        role: 'user',
+        content: `The original task was: "${prompt}"\n\nBased on the API calls and responses above, was the task completed successfully? Reply with:\nVERIFIED: yes/no\nSUMMARY: one sentence describing what was done (or what failed).`,
+      },
+    ],
+  });
+
+  const text = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '';
+  const verified = /VERIFIED:\s*yes/i.test(text);
+  const summaryMatch = text.match(/SUMMARY:\s*(.+)/i);
+  const summary = summaryMatch?.[1]?.trim() ?? text.trim();
+
+  console.log(`[VERIFY] verified=${verified} summary=${summary}`);
+  return { verified, summary };
 }

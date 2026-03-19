@@ -8,11 +8,12 @@
  */
 
 const args = process.argv.slice(2);
-const localMode = args[0] === '--local';
-const prompt = localMode ? args.slice(1).join(' ') : args.join(' ');
+const localMode = args.includes('--local');
+const sandboxMode = args.includes('--sandbox');
+const prompt = args.filter((a) => !a.startsWith('--')).join(' ');
 
 if (!prompt) {
-  console.error('Usage: bun run scripts/solve.ts [--local] "your prompt here"');
+  console.error('Usage: bun scripts/solve.ts [--local] [--sandbox] "your prompt here"');
   process.exit(1);
 }
 
@@ -27,7 +28,9 @@ if (!baseUrl || !sessionToken || !jwtToken || !serviceUrl) {
 }
 
 console.log(`\n📤 Sending to: ${serviceUrl}/solve`);
-console.log(`📝 Prompt: ${prompt}\n`);
+console.log(`📝 Prompt: ${prompt}`);
+if (sandboxMode) console.log(`🧪 Sandbox mode: ON\n`);
+else console.log();
 
 const start = Date.now();
 
@@ -44,6 +47,7 @@ const res = await fetch(`${serviceUrl}/solve`, {
       base_url: baseUrl,
       session_token: sessionToken,
     },
+    use_sandbox: sandboxMode || undefined,
   }),
 });
 
