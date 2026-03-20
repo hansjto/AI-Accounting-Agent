@@ -183,6 +183,8 @@ GET /ledger/vatType?typeOfVat=INCOMING&fields=id,name,percentage to find incomin
 **Timesheet entry** POST /timesheet/entry:
 { employee: {id} (R), activity: {id} (R), date (R), project: {id}, hours, comment }
 - employee, activity, and date are all REQUIRED.
+- IMPORTANT: The date MUST be on or after the project's startDate. If you searched for the project,
+  check its startDate and use that or later. Fresh accounts often have projects starting in 2026.
 - GET /activity?>forTimeSheet?projectId={id}&fields=id,name → valid activities for a project
 - GET /activity?fields=id,name → list all activities
 - PUT /timesheet/month/:approve?employeeIds={id}&monthYear=YYYY-MM-01 → approve month
@@ -196,7 +198,8 @@ POST /salary/transaction → create salary voucher:
 - First GET /salary/type?fields=id,number,name to find salary type IDs.
   Common types: number "1000" = Fastlønn/base salary, number "1000" may vary.
   Look for names containing "fastlønn", "timelønn", "bonus", "overtid".
-- If salary API returns 422 or is unavailable, use MANUAL VOUCHER as fallback:
+- Salary API often returns 422 "Ansatt er ikke registrert med et arbeidsforhold i perioden" because
+  the employee has no employment contract. Use MANUAL VOUCHER as fallback (this is expected):
   POST /ledger/voucher with salary accounts:
   - 5000 = Lønn (salary expense) — debit
   - 2910 = Skyldig lønn (salary payable) — credit
