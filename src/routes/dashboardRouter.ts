@@ -308,8 +308,19 @@ const REPLAY_HTML = `<!DOCTYPE html>
   .tag.tools { color: #58a6ff; }
   .tag.errors { color: #f85149; }
   .tag.errors.zero { color: #3fb950; }
-  .progress-bar { width: 120px; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; }
-  .progress-fill { height: 100%; background: #58a6ff; transition: width 0.3s; }
+
+  /* XP bar */
+  .xp-bar { width: 140px; height: 8px; background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 0; overflow: hidden; position: relative; image-rendering: pixelated; }
+  .xp-fill { height: 100%; background: #7dff4f; transition: width 0.3s; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.3); }
+  .xp-label { position: absolute; top: -1px; left: 0; right: 0; text-align: center; font-size: 7px; font-weight: 700; color: #fff; text-shadow: 1px 1px 0 #000; line-height: 10px; }
+
+  /* Hearts */
+  .hearts { display: flex; gap: 2px; align-items: center; }
+  .heart { width: 12px; height: 12px; position: relative; }
+  .heart svg { width: 12px; height: 12px; }
+  .heart-full { fill: #e23030; }
+  .heart-empty { fill: #3a3a3a; }
+  .heart-half { fill: #e23030; }
 
   .chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
 
@@ -349,21 +360,42 @@ const REPLAY_HTML = `<!DOCTYPE html>
   @keyframes dots { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} }
 
   .restart-notice { align-self: center; color: #8b949e; font-size: 12px; padding: 16px; border-top: 1px solid #30363d; margin-top: 8px; }
+
+  /* Screen shake on damage */
+  @keyframes shake { 0%,100%{transform:translate(0)} 20%{transform:translate(-4px,2px)} 40%{transform:translate(3px,-2px)} 60%{transform:translate(-2px,3px)} 80%{transform:translate(2px,-1px)} }
+  .shake { animation: shake 0.4s ease; }
+
+  /* Red flash overlay on damage */
+  .damage-overlay { position: fixed; inset: 0; background: rgba(255,0,0,0.15); pointer-events: none; opacity: 0; transition: opacity 0.1s; z-index: 100; }
+  .damage-overlay.flash { opacity: 1; }
+
+  /* Achievement toast */
+  .achievement { position: fixed; top: 20px; left: 50%; transform: translateX(-50%) translateY(-80px); background: #1a1a2e; border: 2px solid #d4af37; border-radius: 4px; padding: 12px 24px; text-align: center; z-index: 200; transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); image-rendering: pixelated; }
+  .achievement.show { transform: translateX(-50%) translateY(0); }
+  .achievement-title { color: #d4af37; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .achievement-text { color: #e6edf3; font-size: 13px; margin-top: 4px; }
+
+  /* XP popup particles */
+  .xp-particle { position: fixed; color: #7dff4f; font-size: 11px; font-weight: 700; pointer-events: none; z-index: 150; text-shadow: 1px 1px 0 #000; animation: xpFloat 1s ease-out forwards; }
+  @keyframes xpFloat { 0%{opacity:1;transform:translateY(0)} 100%{opacity:0;transform:translateY(-40px)} }
 </style>
 </head>
 <body>
 
+<div class="damage-overlay" id="damage-overlay"></div>
+<div class="achievement" id="achievement"><div class="achievement-title">Achievement Unlocked!</div><div class="achievement-text" id="achievement-text"></div></div>
+
 <div class="topbar">
   <div class="live-dot playing" id="status-dot"></div>
   <h1 id="title">Agent Replay</h1>
-  <span class="tag" style="color:#8b949e;" id="m-run">—</span>
-  <span class="tag" style="color:#e6edf3;font-family:monospace;" id="m-date">—</span>
+  <span class="tag" style="color:#8b949e;" id="m-run">-</span>
+  <span class="tag" style="color:#e6edf3;font-family:monospace;" id="m-date">-</span>
   <div class="topbar-meta">
-    <span class="tag model" id="m-model">—</span>
-    <span class="tag tools" id="m-tools">— calls</span>
-    <span class="tag errors zero" id="m-errors">— errors</span>
-    <span class="tag time" id="m-time">—s</span>
-    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <span class="tag model" id="m-model">-</span>
+    <span class="tag tools" id="m-tools">- calls</span>
+    <div class="hearts" id="hearts"></div>
+    <span class="tag time" id="m-time">-s</span>
+    <div class="xp-bar"><div class="xp-fill" id="progress"></div><div class="xp-label" id="xp-label">0 XP</div></div>
   </div>
 </div>
 
@@ -534,6 +566,9 @@ async function playReplay() {
   document.getElementById('m-time').textContent = ((run.summary?.elapsedMs || 0) / 1000).toFixed(1) + 's';
   document.getElementById('status-dot').className = 'live-dot playing';
 
+  // Reset Minecraft state
+  resetRunState(errCount);
+
   const chat = document.getElementById('chat');
   chat.innerHTML = '';
 
@@ -545,10 +580,23 @@ async function playReplay() {
     const html = renderEvent(ev);
     if (!html) continue;
 
+    // Sound effects and visual feedback
+    if (ev.type === 'error') { takeDamage(); }
+    else if (ev.type === 'tool') { sfxToolUse(); spawnXpParticle(5); }
+    else if (ev.type === 'result') { sfxXpOrb(); spawnXpParticle(10); }
+    else if (ev.type === 'search') { sfxSearch(); }
+    else if (ev.type === 'verify') {
+      if (ev.verified) { showAchievement('Task Completed Successfully'); sfxLevelUp(); }
+      else { sfxFail(); takeDamage(); takeDamage(); }
+    }
+
     chat.insertAdjacentHTML('beforeend', html);
     chat.scrollTop = chat.scrollHeight;
 
-    document.getElementById('progress').style.width = ((i + 1) / events.length * 100) + '%';
+    // XP bar
+    const pct = (i + 1) / events.length * 100;
+    document.getElementById('progress').style.width = pct + '%';
+    document.getElementById('xp-label').textContent = Math.round(pct) + ' XP';
 
     let delay = STEP_DELAY;
     if (ev.type === 'search') delay = 500;
@@ -579,6 +627,128 @@ async function playReplay() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Minecraft Audio Engine (Web Audio API — no files needed) ──
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(freq, duration, type, vol) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type || 'square';
+  osc.frequency.value = freq;
+  gain.gain.value = vol || 0.08;
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxDamage() {
+  // Minecraft "oof" — low thud
+  playTone(100, 0.15, 'sawtooth', 0.12);
+  setTimeout(() => playTone(80, 0.1, 'square', 0.08), 50);
+}
+
+function sfxXpOrb() {
+  // Bright high ding
+  const base = 800 + Math.random() * 400;
+  playTone(base, 0.08, 'sine', 0.05);
+  setTimeout(() => playTone(base * 1.5, 0.06, 'sine', 0.04), 40);
+}
+
+function sfxLevelUp() {
+  // Ascending chime
+  [523, 659, 784, 1047].forEach((f, i) => {
+    setTimeout(() => playTone(f, 0.15, 'sine', 0.07), i * 100);
+  });
+}
+
+function sfxAchievement() {
+  // Triumphant chord
+  [523, 659, 784].forEach((f, i) => {
+    setTimeout(() => playTone(f, 0.3, 'sine', 0.06), i * 60);
+  });
+  setTimeout(() => playTone(1047, 0.4, 'sine', 0.08), 200);
+}
+
+function sfxFail() {
+  // Descending sad tones
+  [400, 350, 280].forEach((f, i) => {
+    setTimeout(() => playTone(f, 0.2, 'sawtooth', 0.06), i * 120);
+  });
+}
+
+function sfxToolUse() {
+  // Soft click like placing a block
+  playTone(600, 0.03, 'square', 0.04);
+  setTimeout(() => playTone(800, 0.02, 'square', 0.03), 20);
+}
+
+function sfxSearch() {
+  // Quiet page flip
+  playTone(2000, 0.02, 'sine', 0.02);
+}
+
+// ── Visual Effects ──
+
+let currentHearts = 10;
+let maxHearts = 10;
+
+function renderHearts() {
+  const el = document.getElementById('hearts');
+  const heartSvg = (fill) => '<div class="heart"><svg viewBox="0 0 10 9"><path d="M1 3Q1 1 3 1Q5 1 5 3Q5 1 7 1Q9 1 9 3Q9 5 5 8Q1 5 1 3Z" class="' + fill + '"/></svg></div>';
+  el.innerHTML = Array.from({length: 5}, (_, i) => {
+    const idx = i * 2;
+    if (currentHearts >= idx + 2) return heartSvg('heart-full');
+    if (currentHearts >= idx + 1) return heartSvg('heart-half');
+    return heartSvg('heart-empty');
+  }).join('');
+}
+
+function takeDamage() {
+  currentHearts = Math.max(0, currentHearts - 2);
+  renderHearts();
+  sfxDamage();
+  // Red flash
+  const overlay = document.getElementById('damage-overlay');
+  overlay.classList.add('flash');
+  setTimeout(() => overlay.classList.remove('flash'), 200);
+  // Screen shake
+  document.getElementById('chat').classList.add('shake');
+  setTimeout(() => document.getElementById('chat').classList.remove('shake'), 400);
+}
+
+function showAchievement(text) {
+  const el = document.getElementById('achievement');
+  document.getElementById('achievement-text').textContent = text;
+  el.classList.add('show');
+  sfxAchievement();
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+function spawnXpParticle(amount) {
+  const el = document.createElement('div');
+  el.className = 'xp-particle';
+  el.textContent = '+' + amount + ' XP';
+  el.style.left = (Math.random() * 60 + 20) + '%';
+  el.style.top = (Math.random() * 30 + 50) + '%';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
+}
+
+// ── Enhanced playReplay with effects ──
+
+const origRenderEvent = renderEvent;
+// Patch into the play loop via the event handling
+
+// Reset hearts and XP for each run
+function resetRunState(errorCount) {
+  maxHearts = 10;
+  currentHearts = 10;
+  renderHearts();
+}
 
 playReplay();
 </script>
