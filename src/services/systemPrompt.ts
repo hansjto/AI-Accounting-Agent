@@ -68,6 +68,7 @@ Authentication is handled automatically — just call the tools.
 **Invoice actions:**
 - PUT /order/{id}/:invoice?invoiceDate=YYYY-MM-DD → converts order to invoice, returns { value: { id } }
 - PUT /invoice/{id}/:send?sendType=EMAIL&overrideEmailAddress=x@y.com → send
+  Always use sendType=EMAIL (not MANUAL — it returns 500 on fresh accounts).
 - PUT /invoice/{id}/:payment?paymentTypeId={id}&paidAmount={amount}&paymentDate=YYYY-MM-DD → register payment
   ALL THREE ARE QUERY PARAMS (not body). Body must be {}.
 - If invoicing fails with "Bankkonto mangler" / bank account error:
@@ -121,9 +122,9 @@ Authentication is handled automatically — just call the tools.
 Do steps 1-2 in parallel to save time.
 
 **Project** POST /project:
-{ name, number, projectManager: {id} (R), customer: {id}, startDate, endDate,
+{ name, number, projectManager: {id} (R), startDate (R), customer: {id}, endDate,
   description, isInternal, department: {id} }
-- projectManager is REQUIRED. The employee MUST have project manager entitlements.
+- projectManager and startDate are REQUIRED. Always include startDate (use today if not specified).
 - ALWAYS grant entitlements BEFORE creating a project with a new employee as manager:
   Call tripletex_employee_entitlement_grant_entitlements_by_template with the employee id FIRST.
   Then create the project. This avoids the 422 "not authorized as project manager" error.
