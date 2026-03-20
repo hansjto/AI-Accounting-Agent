@@ -140,7 +140,7 @@ Do steps 1-2 in parallel to save time.
   NOT "accountingDimensionValue1", "freeDimension1", or "dimension1" — those all fail with 422.
 
 **Supplier/incoming invoice — register new invoice:**
-POST /incomingInvoice (BETA) — use this to register a supplier invoice:
+Use tripletex_incoming_invoice_create (preloaded, no tool_search needed):
 {
   invoiceHeader: {
     vendorId: <supplier id>,
@@ -162,6 +162,13 @@ POST /incomingInvoice (BETA) — use this to register a supplier invoice:
 CRITICAL: field names use flat IDs (vendorId, accountId, vatTypeId, currencyId) — NOT nested objects like {id: N}.
 amountInclVat is the gross amount including VAT on the order line.
 If the total is 62600 incl 25% VAT: amountInclVat=62600, vatTypeId=<incoming high rate VAT id>.
+
+**Supplier invoice via VOUCHER fallback** (if incomingInvoice fails or 403):
+For supplier invoices, use a voucher with these postings:
+  - Row 1: Expense account (e.g. 6860), amount = NET amount (excl VAT), vatType = incoming VAT type
+  - Row 2: Accounts payable 2400, amount = -GROSS amount (incl VAT), supplier: {id}
+Tripletex auto-calculates VAT when vatType is set. Do NOT manually split VAT to account 2710.
+Use "amount" field (not "amountGross" or "amountGrossCurrency" — those don't exist on Posting).
 GET /ledger/vatType?typeOfVat=INCOMING&fields=id,name,percentage to find incoming VAT types.
 
 **Supplier invoice actions (existing invoices):**
