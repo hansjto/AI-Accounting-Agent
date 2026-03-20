@@ -356,6 +356,8 @@ const REPLAY_HTML = `<!DOCTYPE html>
 <div class="topbar">
   <div class="live-dot playing" id="status-dot"></div>
   <h1 id="title">Agent Replay</h1>
+  <span class="tag" style="color:#8b949e;" id="m-run">—</span>
+  <span class="tag" style="color:#e6edf3;font-family:monospace;" id="m-date">—</span>
   <div class="topbar-meta">
     <span class="tag model" id="m-model">—</span>
     <span class="tag tools" id="m-tools">— calls</span>
@@ -372,25 +374,52 @@ const REPLAY_HTML = `<!DOCTYPE html>
 <script>
 const STEP_DELAY = 1500;
 const PAUSE_AFTER = 6000;
-let playingRun = null;  // filename currently being played
+let playingRun = null;
 let abortReplay = false;
+let allRuns = []; // sorted by filename descending (newest first)
+let totalRunCount = 0;
 
-// Fetch the latest run filename (cache-busted)
-async function fetchLatestFilename() {
+// Fetch all runs, sorted newest first
+async function fetchRuns() {
   try {
     const res = await fetch('/api/runs?t=' + Date.now());
     const runs = await res.json();
-    return runs.length > 0 ? runs[0].filename : null;
-  } catch { return null; }
+    // Sort by filename descending to ensure newest first
+    runs.sort((a, b) => b.filename.localeCompare(a.filename));
+    allRuns = runs;
+    totalRunCount = runs.length;
+    return runs;
+  } catch { return allRuns; }
+}
+
+// Get the latest filename
+async function fetchLatestFilename() {
+  const runs = await fetchRuns();
+  return runs.length > 0 ? runs[0].filename : null;
 }
 
 // Fetch full run detail
 async function fetchRunDetail(filename) {
   const res = await fetch('/api/runs/' + filename + '?t=' + Date.now());
   const data = await res.json();
-  const res2 = await fetch('/api/runs?t=' + Date.now());
-  const runs = await res2.json();
-  return { summary: runs.find(r => r.filename === filename), detail: data };
+  const summary = allRuns.find(r => r.filename === filename);
+  return { summary, detail: data };
+}
+
+// Format filename to readable date
+function formatDate(filename) {
+  // result-2026-03-20T19-53-10-319Z.json -> 2026-03-20 19:53:10
+  const ts = filename.replace('result-', '').replace('.json', '');
+  const parts = ts.match(/(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2})-(\\d{2})-(\\d{2})/);
+  if (!parts) return ts;
+  return parts[1] + '-' + parts[2] + '-' + parts[3] + ' ' + parts[4] + ':' + parts[5] + ':' + parts[6];
+}
+
+// Get the run number (1 = oldest, N = newest)
+function getRunNumber(filename) {
+  const idx = allRuns.findIndex(r => r.filename === filename);
+  if (idx < 0) return '?';
+  return totalRunCount - idx;
 }
 
 // Background poller: always check for newer runs and interrupt if found
@@ -494,6 +523,8 @@ async function playReplay() {
   const events = parseEvents(run.detail);
 
   // Update topbar
+  document.getElementById('m-run').textContent = 'Run #' + getRunNumber(latest) + ' of ' + totalRunCount;
+  document.getElementById('m-date').textContent = formatDate(latest);
   document.getElementById('m-model').textContent = run.detail.model || '?';
   document.getElementById('m-tools').textContent = (run.summary?.toolCallCount || 0) + ' calls';
   const errEl = document.getElementById('m-errors');
