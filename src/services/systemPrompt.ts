@@ -201,14 +201,18 @@ POST /salary/transaction → create salary voucher:
   - 5000 = Lønn (salary expense) — debit
   - 2910 = Skyldig lønn (salary payable) — credit
   - 5001 = Bonus / tillegg — debit (for bonuses)
+  CRITICAL: Postings on salary accounts (5000-series) REQUIRE employee: {id} on EVERY posting.
+  Without it you get "postings.employee.id - Ansatt mangler" (422).
   When using voucher: look up EACH account separately with GET /ledger/account?number=5000&fields=id,number,name
   Do NOT search multiple numbers in one query — it won't work.
 
 **Accounting dimensions:**
-- POST /ledger/accountingDimensionName → { dimensionName (R), active: true } — create a free dimension (e.g. "Kostsenter")
+- ALWAYS search first before creating: GET /ledger/accountingDimensionName?fields=id,dimensionName
+  Creating a name that already exists returns 422 "Navnet er i bruk".
+  If it exists, use the existing id. If not, create it.
+- POST /ledger/accountingDimensionName → { dimensionName (R), active: true }
 - POST /ledger/accountingDimensionValue → { displayName (R), dimensionIndex (R), active: true, showInVoucherRegistration: true }
   dimensionIndex: 1 for the first dimension, 2 for second, 3 for third
-- GET /ledger/accountingDimensionName?fields=id,dimensionName — list existing dimensions
 - GET /ledger/accountingDimensionValue?fields=id,displayName,dimensionIndex — list values
 - To link a dimension value to a voucher posting, use freeAccountingDimension1/2/3: {id} on each posting
 
