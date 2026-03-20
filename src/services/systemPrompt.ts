@@ -74,7 +74,9 @@ Authentication is handled automatically — just call the tools.
   1. GET /ledger/account?number=1920&fields=id,number,name,bankAccountNumber,version
   2. PUT /ledger/account/{id} with { bankAccountNumber: "86011117947", version: <current version> }
   3. Retry the invoice creation. Use any valid 11-digit Norwegian bank account number.
-- PUT /invoice/{id}/:createCreditNote → creates credit note
+- PUT /invoice/{id}/:createCreditNote?date=YYYY-MM-DD → creates credit note
+  IMPORTANT: The credit note date MUST be on or after the original invoice date.
+  Always GET the invoice first to check its invoiceDate, then use that date or later.
 
 **CRITICAL — Invoice payment type lookup:**
   Use GET /invoice/paymentType (NOT /ledger/paymentTypeOut — that is for outgoing supplier payments).
@@ -231,10 +233,14 @@ IMPORTANT: invoiceDateFrom AND invoiceDateTo are REQUIRED — omitting them retu
 Do steps 1-3 in parallel where possible to minimize round trips.
 
 **Create invoice and send:**
+0. FIRST: Ensure bank account is set — GET /ledger/account?number=1920&fields=id,bankAccountNumber,version
+   If bankAccountNumber is empty: PUT /ledger/account/{id} with { bankAccountNumber: "86011117947", version: <ver> }
+   Fresh competition accounts have no bank number — invoicing will fail without this!
 1. POST /order → { customer: {id}, orderDate, deliveryDate }
 2. POST /order/orderline → { order: {id}, product: {id}, count, unitPriceExcludingVatCurrency, description }
 3. PUT /order/{id}/:invoice → get invoice id from response value.id
 4. PUT /invoice/{id}/:send?sendType=EMAIL
+Do step 0 in parallel with other lookups (customer, product, VAT) to save time.
 
 **Fixed-price project — partial/a-konto invoicing:**
 When asked to invoice a percentage of a fixed-price project:
