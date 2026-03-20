@@ -76,6 +76,9 @@ web_modules/
 # Competition request logs (contain session tokens)
 test-requests/*.json
 
+# Test run results (large JSON files with full conversations)
+test-results/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

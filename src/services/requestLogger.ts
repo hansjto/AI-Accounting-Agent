@@ -1,4 +1,5 @@
 import { Storage } from '@google-cloud/storage';
+import type { AgentResult } from './claudeAgent.js';
 
 const storage = new Storage();
 const BUCKET = 'tripletex-solve-requests';
@@ -24,4 +25,40 @@ export async function logRequest(body: unknown): Promise<string> {
   }
 
   return filename;
+}
+
+export async function logResult(
+  requestFilename: string,
+  prompt: string,
+  agentResult: AgentResult,
+  verification?: { verified: boolean; summary: string },
+  elapsedMs?: number,
+): Promise<void> {
+  const resultFilename = requestFilename.replace('request-', 'result-');
+
+  const payload = {
+    prompt,
+    model: 'claude-sonnet-4-6',
+    elapsedMs,
+    toolCallCount: agentResult.toolCallCount,
+    errors: agentResult.errors,
+    systemPrompt: agentResult.systemPrompt.map((b: any) => b.text),
+    messages: agentResult.messages,
+    verification,
+  };
+
+  const content = JSON.stringify(payload, null, 2);
+
+  // Always log summary to stdout
+  console.log(`[RESULT] ${resultFilename} tools=${agentResult.toolCallCount} errors=${agentResult.errors.length} verified=${verification?.verified ?? 'n/a'}`);
+
+  // Save to GCS
+  try {
+    await storage.bucket(BUCKET).file(resultFilename).save(content, {
+      contentType: 'application/json',
+    });
+    console.log(`[SAVED TO GCS] gs://${BUCKET}/${resultFilename}`);
+  } catch (err) {
+    console.error(`[GCS RESULT SAVE FAILED]`, err);
+  }
 }

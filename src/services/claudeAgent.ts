@@ -1,156 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { tripletexRequest } from './tripletexClient.js';
 import { buildSystemPrompt } from './systemPrompt.js';
 import type { TripletexCredentials } from '../types.js';
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ---------------------------------------------------------------------------
-// Tool definitions
-// ---------------------------------------------------------------------------
+const MCP_SERVER_URL = 'https://trippeltex-mcp-production-0d9b.up.railway.app/mcp';
 
-const TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'tripletex_get',
-    description:
-      'Perform a GET request against the Tripletex v2 REST API. ' +
-      'Use this to list or retrieve resources. ' +
-      'List responses: {from, count, values:[...]}. ' +
-      'Use fields param to limit response size. ' +
-      'Paginate with count and from params.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'API path, e.g. /employee, /customer, /invoice/1234',
-        },
-        params: {
-          type: 'object',
-          description: 'Query parameters, e.g. {"fields": "id,firstName", "count": "100"}',
-          additionalProperties: true,
-        },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'tripletex_post',
-    description: 'Perform a POST request to create a new resource in Tripletex.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'API path, e.g. /employee, /order',
-        },
-        body: {
-          type: 'object',
-          description: 'JSON request body',
-          additionalProperties: true,
-        },
-      },
-      required: ['path', 'body'],
-    },
-  },
-  {
-    name: 'tripletex_put',
-    description:
-      'Perform a PUT request to update a resource or trigger an action endpoint ' +
-      '(e.g. /invoice/{id}/:send, /order/{id}/:invoice, /ledger/voucher/{id}/:reverse).',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'API path, e.g. /employee/42, /invoice/5/:send',
-        },
-        body: {
-          type: 'object',
-          description: 'JSON request body (use empty object {} for action endpoints)',
-          additionalProperties: true,
-        },
-        params: {
-          type: 'object',
-          description: 'Query parameters, e.g. {"sendType": "EMAIL"} for /:send',
-          additionalProperties: true,
-        },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'tripletex_delete',
-    description: 'Perform a DELETE request to remove a resource from Tripletex.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'API path with ID, e.g. /employee/42',
-        },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'tripletex_post_list',
-    description:
-      'Perform a POST /*/list request to create multiple resources in one call. ' +
-      'Always prefer this over multiple individual POSTs when creating more than one resource.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        path: {
-          type: 'string',
-          description: 'API path ending in /list, e.g. /order/orderline/list',
-        },
-        body: {
-          type: 'array',
-          description: 'Array of objects to create',
-          items: { type: 'object', additionalProperties: true },
-        },
-      },
-      required: ['path', 'body'],
-    },
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Tool executor
-// ---------------------------------------------------------------------------
-
-async function executeTool(
-  name: string,
-  input: Record<string, unknown>,
-  credentials: TripletexCredentials
-): Promise<string> {
-  const path = input.path as string;
-
-  let result: unknown;
-
-  switch (name) {
-    case 'tripletex_get':
-      result = await tripletexRequest('GET', credentials, path, input.params as Record<string, unknown> | undefined);
-      break;
-    case 'tripletex_post':
-      result = await tripletexRequest('POST', credentials, path, undefined, input.body);
-      break;
-    case 'tripletex_put':
-      result = await tripletexRequest('PUT', credentials, path, input.params as Record<string, unknown> | undefined, input.body ?? {});
-      break;
-    case 'tripletex_delete':
-      result = await tripletexRequest('DELETE', credentials, path);
-      break;
-    case 'tripletex_post_list':
-      result = await tripletexRequest('POST', credentials, path, undefined, input.body);
-      break;
-    default:
-      result = { error: `Unknown tool: ${name}` };
-  }
-
-  return JSON.stringify(result);
-}
+const AGENT_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min — leave margin before 5 min competition timeout
 
 // ---------------------------------------------------------------------------
 // Main agent
@@ -159,16 +15,19 @@ async function executeTool(
 export interface AgentResult {
   toolCallCount: number;
   errors: Array<{ tool: string; status: number }>;
-  messages: Anthropic.MessageParam[];
+  messages: any[];
+  systemPrompt: any[];
 }
 
 export async function runAgent(
   prompt: string,
   credentials: TripletexCredentials,
-  imageAttachments: Array<{ mimeType: string; data: string }> = []
+  imageAttachments: Array<{ mimeType: string; data: string }> = [],
+  pdfAttachments: Array<{ filename: string; data: string }> = [],
 ): Promise<AgentResult> {
-  const content: Anthropic.MessageParam['content'] = [];
+  const content: any[] = [];
 
+  // Add images
   for (const img of imageAttachments) {
     content.push({
       type: 'image',
@@ -179,69 +38,113 @@ export async function runAgent(
       },
     });
   }
+
+  // Add PDFs as documents
+  for (const pdf of pdfAttachments) {
+    content.push({
+      type: 'document',
+      source: {
+        type: 'base64',
+        media_type: 'application/pdf',
+        data: pdf.data,
+      },
+    });
+  }
+
   content.push({ type: 'text', text: prompt });
 
-  const messages: Anthropic.MessageParam[] = [{ role: 'user', content }];
+  const messages: any[] = [{ role: 'user', content }];
   const systemPrompt = buildSystemPrompt(prompt);
   let toolCallCount = 0;
   const errors: AgentResult['errors'] = [];
+  const startTime = Date.now();
 
-  // Agentic loop
+  // Agentic loop — MCP tools execute server-side, but we loop in case
+  // Claude needs multiple turns (e.g. max_tokens reached mid-response)
   while (true) {
-    const response = await claude.messages.create({
-      model: 'claude-opus-4-6',
-      max_tokens: 8192,
-      system: systemPrompt,
-      tools: TOOLS,
-      messages,
-    });
-
-    console.log(`[CLAUDE] stop_reason=${response.stop_reason} tool_calls=${response.content.filter(b => b.type === 'tool_use').length}`);
-
-    const toolUseBlocks = response.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
-    );
-
-    messages.push({ role: 'assistant', content: response.content });
-
-    if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) break;
-
-    toolCallCount += toolUseBlocks.length;
-
-    // Execute all tool calls in parallel
-    const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
-      toolUseBlocks.map(async (block) => {
-        console.log(`[TOOL] ${block.name} ${JSON.stringify(block.input)}`);
-        const result = await executeTool(block.name, block.input as Record<string, unknown>, credentials);
-        console.log(`[TOOL RESULT] ${block.name} → ${result.slice(0, 200)}`);
-
-        // Track non-2xx responses
-        try {
-          const parsed = JSON.parse(result) as { status_code?: number };
-          if (parsed.status_code && parsed.status_code >= 400) {
-            errors.push({ tool: block.name, status: parsed.status_code });
-          }
-        } catch { /* ignore parse errors */ }
-
-        return {
-          type: 'tool_result' as const,
-          tool_use_id: block.id,
-          content: result,
-        };
-      })
-    );
-
-    // Abort immediately on auth failure — no point retrying with bad credentials
-    const hasAuthFailure = errors.some((e) => e.status === 401 || e.status === 403);
-    if (hasAuthFailure) {
-      console.log('[AGENT] Auth failure detected — aborting loop');
+    // Timeout guard
+    if (Date.now() - startTime > AGENT_TIMEOUT_MS) {
+      console.warn(`[TIMEOUT] Agent loop exceeded ${AGENT_TIMEOUT_MS / 1000}s limit`);
       break;
     }
 
-    messages.push({ role: 'user', content: toolResults });
+    const response = await (claude.beta.messages.create as Function)({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 16384,
+      betas: ['mcp-client-2025-11-20'],
+      system: systemPrompt,
+      mcp_servers: [
+        {
+          type: 'url',
+          url: `${MCP_SERVER_URL}?base_url=${encodeURIComponent(credentials.base_url)}`,
+          name: 'tripletex',
+          authorization_token: credentials.session_token,
+        },
+      ],
+      tools: [
+        { type: 'tool_search_tool_bm25_20251119', name: 'tool_search_tool_bm25' },
+        {
+          type: 'mcp_toolset',
+          mcp_server_name: 'tripletex',
+          default_config: { defer_loading: true },
+          configs: {
+            // Preload commonly used tools to reduce tool_search calls
+            tripletex_customer_search: { defer_loading: false },
+            tripletex_customer_create: { defer_loading: false },
+            tripletex_employee_search: { defer_loading: false },
+            tripletex_employee_create: { defer_loading: false },
+            tripletex_employee_update: { defer_loading: false },
+            tripletex_employee_entitlement_grant_entitlements_by_template: { defer_loading: false },
+            tripletex_invoice_create: { defer_loading: false },
+            tripletex_invoice_payment: { defer_loading: false },
+            tripletex_invoice_send: { defer_loading: false },
+            tripletex_order_create: { defer_loading: false },
+            tripletex_order_orderline_create: { defer_loading: false },
+            tripletex_product_search: { defer_loading: false },
+            tripletex_product_create: { defer_loading: false },
+            tripletex_department_search: { defer_loading: false },
+            tripletex_department_create: { defer_loading: false },
+            tripletex_project_create: { defer_loading: false },
+            tripletex_travel_expense_create: { defer_loading: false },
+            tripletex_ledger_voucher_create: { defer_loading: false },
+            tripletex_supplier_invoice_search: { defer_loading: false },
+          },
+        },
+      ],
+      messages,
+    }) as any;
+
+    // Count and log tool activity
+    for (const block of response.content as any[]) {
+      if (block.type === 'mcp_tool_use') {
+        toolCallCount++;
+        console.log(`[MCP TOOL] ${block.name} ${JSON.stringify(block.input)}`);
+      } else if (block.type === 'mcp_tool_result') {
+        const preview = JSON.stringify(block.content).slice(0, 200);
+        console.log(`[MCP RESULT] ${block.is_error ? 'ERROR ' : ''}${preview}`);
+        if (block.is_error) {
+          errors.push({ tool: block.tool_use_id ?? 'mcp_tool', status: 0 });
+        }
+      } else if (block.type === 'server_tool_use') {
+        console.log(`[TOOL SEARCH] query=${JSON.stringify(block.input)}`);
+      }
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[CLAUDE] stop_reason=${response.stop_reason} mcp_tool_calls=${toolCallCount} elapsed=${elapsed}s`);
+
+    messages.push({ role: 'assistant', content: response.content });
+
+    if (response.stop_reason === 'end_turn') break;
+
+    // Safety: break if no tool activity in this turn
+    const hasToolActivity = (response.content as any[]).some(
+      (b) => b.type === 'mcp_tool_use' || b.type === 'tool_use' || b.type === 'server_tool_use'
+    );
+    if (!hasToolActivity) break;
   }
 
-  return { toolCallCount, errors, messages };
+  return { toolCallCount, errors, messages, systemPrompt };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,24 +155,47 @@ export async function verifySandboxResult(
   prompt: string,
   result: AgentResult
 ): Promise<{ verified: boolean; summary: string }> {
-  const response = await claude.messages.create({
-    model: 'claude-opus-4-6',
-    max_tokens: 512,
-    system: 'You are verifying whether an accounting task was completed successfully in Tripletex. Be concise.',
-    messages: [
-      ...result.messages,
-      {
-        role: 'user',
-        content: `The original task was: "${prompt}"\n\nBased on the API calls and responses above, was the task completed successfully? Reply with:\nVERIFIED: yes/no\nSUMMARY: one sentence describing what was done (or what failed).`,
-      },
-    ],
+  // Strip MCP tool blocks from messages — the verification call doesn't have MCP configured
+  const cleanMessages = result.messages.map((msg: any) => {
+    if (!Array.isArray(msg.content)) return msg;
+    const cleaned = msg.content
+      .filter((b: any) => ['text', 'mcp_tool_use', 'mcp_tool_result'].includes(b.type))
+      .map((b: any) => {
+        if (b.type === 'mcp_tool_use') {
+          return { type: 'text', text: `[TOOL CALL] ${b.name}(${JSON.stringify(b.input)})` };
+        }
+        if (b.type === 'mcp_tool_result') {
+          const preview = JSON.stringify(b.content).slice(0, 500);
+          return { type: 'text', text: `[TOOL RESULT] ${b.is_error ? 'ERROR ' : ''}${preview}` };
+        }
+        return b;
+      });
+    return { ...msg, content: cleaned.length > 0 ? cleaned : [{ type: 'text', text: '(no text)' }] };
   });
 
-  const text = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '';
-  const verified = /VERIFIED:\s*yes/i.test(text);
-  const summaryMatch = text.match(/SUMMARY:\s*(.+)/i);
-  const summary = summaryMatch?.[1]?.trim() ?? text.trim();
+  try {
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 512,
+      system: 'You are verifying whether an accounting task was completed successfully in Tripletex. Be concise.',
+      messages: [
+        ...cleanMessages,
+        {
+          role: 'user',
+          content: `The original task was: "${prompt}"\n\nBased on the API calls and responses above, was the task completed successfully? Reply with:\nVERIFIED: yes/no\nSUMMARY: one sentence describing what was done (or what failed).`,
+        },
+      ],
+    });
 
-  console.log(`[VERIFY] verified=${verified} summary=${summary}`);
-  return { verified, summary };
+    const text = response.content.find((b) => b.type === 'text')?.text ?? '';
+    const verified = /VERIFIED:\s*yes/i.test(text);
+    const summaryMatch = text.match(/SUMMARY:\s*(.+)/i);
+    const summary = summaryMatch?.[1]?.trim() ?? text.trim();
+
+    console.log(`[VERIFY] verified=${verified} summary=${summary}`);
+    return { verified, summary };
+  } catch (err) {
+    console.error(`[VERIFY ERROR]`, err);
+    return { verified: false, summary: `Verification failed: ${err}` };
+  }
 }

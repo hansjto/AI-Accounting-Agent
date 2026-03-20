@@ -6,27 +6,27 @@ import type { SolveRequestBody } from '../types.js';
 
 export const solveRouter = Router();
 
-const solveSchema = Joi.object({
-  prompt: Joi.string().required(),
-  files: Joi.array()
-    .items(
+const validateSolve = celebrate({
+  [Segments.BODY]: Joi.object({
+    prompt: Joi.string().required(),
+    tripletex_credentials: Joi.object({
+      base_url: Joi.string().uri().required(),
+      session_token: Joi.string().required(),
+    }).required(),
+    files: Joi.array().items(
       Joi.object({
         filename: Joi.string().required(),
-        content: Joi.string().required(),
+        content_base64: Joi.string().required(),
         mime_type: Joi.string().required(),
       })
-    )
-    .optional(),
-  tripletex_credentials: Joi.object({
-    base_url: Joi.string().uri().required(),
-    session_token: Joi.string().required(),
-  }).required(),
-  use_sandbox: Joi.boolean().optional(),
+    ).default([]),
+    use_sandbox: Joi.boolean(),
+  }),
 });
 
 solveRouter.post(
   '/',
-  celebrate({ [Segments.BODY]: solveSchema }),
+  validateSolve,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       logRequest(req.body).catch((err) => console.error('[LOG ERROR]', err));

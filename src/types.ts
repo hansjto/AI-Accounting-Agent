@@ -5,7 +5,7 @@ export interface TripletexCredentials {
 
 export interface FileAttachment {
   filename: string;
-  content: string; // base64-encoded
+  content_base64: string; // base64-encoded (field name per competition spec)
   mime_type: string;
 }
 
