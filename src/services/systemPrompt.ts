@@ -110,7 +110,32 @@ Authentication is handled automatically — just call the tools.
 - Free accounting dimensions on postings use: freeAccountingDimension1, freeAccountingDimension2, freeAccountingDimension3
   NOT "accountingDimensionValue1", "freeDimension1", or "dimension1" — those all fail with 422.
 
-**Supplier invoice actions:**
+**Supplier/incoming invoice — register new invoice:**
+POST /incomingInvoice (BETA) — use this to register a supplier invoice:
+{
+  invoiceHeader: {
+    vendorId: <supplier id>,
+    invoiceDate: "YYYY-MM-DD",
+    dueDate: "YYYY-MM-DD",
+    invoiceNumber: "INV-XXX",
+    invoiceAmount: <total amount incl VAT>,
+    currencyId: 1,
+    description: "description"
+  },
+  orderLines: [{
+    row: 1,
+    description: "line description",
+    accountId: <account id>,
+    amountInclVat: <amount incl VAT>,
+    vatTypeId: <vat type id>
+  }]
+}
+CRITICAL: field names use flat IDs (vendorId, accountId, vatTypeId, currencyId) — NOT nested objects like {id: N}.
+amountInclVat is the gross amount including VAT on the order line.
+If the total is 62600 incl 25% VAT: amountInclVat=62600, vatTypeId=<incoming high rate VAT id>.
+GET /ledger/vatType?typeOfVat=INCOMING&fields=id,name,percentage to find incoming VAT types.
+
+**Supplier invoice actions (existing invoices):**
 - GET /supplierInvoice?fields=id,invoiceNumber,amountCurrency,supplier → find invoices
 - PUT /supplierInvoice/{id}/:approve → approve (body: {})
 - PUT /supplierInvoice/{id}/:reject → body: { comment }
