@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Replay</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.topbar h1{font-size:15px;font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;background:#3fb950;animation:pulse 2s infinite}
+.dot.paused{background:#d29922;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.meta{margin-left:auto;display:flex;gap:10px;align-items:center}
+.tag{background:#1f2937;border:1px solid #30363d;padding:2px 10px;border-radius:4px;font-size:11px;color:#8b949e}
+.tag.purple{color:#d2a8ff}.tag.blue{color:#58a6ff}.tag.red{color:#f85149}.tag.green{color:#3fb950}.tag.mono{font-family:monospace;color:#93c5fd}
+.pbar{width:140px;height:6px;background:#30363d;border-radius:3px;overflow:hidden}
+.pfill{height:100%;background:#58a6ff;transition:width .3s;border-radius:3px}
+.hearts{display:flex;gap:2px}
+.chat{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:8px;scroll-behavior:smooth}
+.msg{max-width:90%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;animation:fadeIn .3s ease forwards;opacity:0}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.msg-user{align-self:flex-end;background:#1a3a5c;border:1px solid #264b73;border-bottom-right-radius:4px}
+.msg-user .lb{color:#58a6ff;font-weight:600;font-size:11px;margin-bottom:4px}
+.msg-ai{align-self:flex-start;background:#1c1c2e;border:1px solid #2d2d44;border-bottom-left-radius:4px}
+.msg-ai .lb{color:#d2a8ff;font-weight:600;font-size:11px;margin-bottom:4px}
+.msg-tool{align-self:flex-start;background:#0d2137;border:1px solid #1a3a5c;border-left:3px solid #58a6ff;border-radius:6px;font-family:monospace;font-size:12px;max-width:95%}
+.msg-tool .lb{color:#58a6ff;font-weight:700;font-size:11px;margin-bottom:2px}
+.msg-ok{align-self:flex-start;background:#0d1a0d;border:1px solid #1a3a1a;border-left:3px solid #3fb950;border-radius:6px;font-family:monospace;font-size:11px;max-width:95%;color:#8b949e}
+.msg-ok .lb{color:#3fb950;font-weight:700;font-size:11px;margin-bottom:2px}
+.msg-err{align-self:flex-start;background:#1a0d0d;border:1px solid #3a1a1a;border-left:3px solid #f85149;border-radius:6px;font-family:monospace;font-size:11px;max-width:95%;color:#f85149}
+.msg-err .lb{color:#f85149;font-weight:700;font-size:11px;margin-bottom:2px}
+.msg-srch{align-self:flex-start;background:#161b22;border:1px solid #30363d;border-left:3px solid #8b949e;border-radius:6px;font-family:monospace;font-size:11px;color:#8b949e;font-style:italic;padding:6px 12px}
+.msg-sys{align-self:center;background:#161b22;border:1px solid #30363d;border-radius:20px;font-size:12px;color:#8b949e;padding:6px 16px}
+.msg-v{align-self:center;padding:12px 24px;border-radius:12px;font-size:14px;font-weight:600;text-align:center}
+.msg-v.pass{background:#0d2a0d;border:2px solid #3fb950;color:#3fb950}
+.msg-v.fail{background:#2a0d0d;border:2px solid #f85149;color:#f85149}
+.ct{white-space:pre-wrap;word-break:break-word}
+.trunc{max-height:100px;overflow:hidden;position:relative}
+.trunc::after{content:'';position:absolute;bottom:0;left:0;right:0;height:24px;background:linear-gradient(transparent,#0d2137)}
+.info{align-self:center;color:#8b949e;font-size:12px;padding:20px}
+.dmg{position:fixed;inset:0;background:rgba(255,0,0,.12);pointer-events:none;opacity:0;transition:opacity .1s;z-index:100}
+.dmg.on{opacity:1}
+@keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-3px,2px)}50%{transform:translate(2px,-2px)}75%{transform:translate(-1px,1px)}}
+.shake{animation:shake .3s ease}
+</style>
+</head>
+<body>
+<div class="dmg" id="dmg"></div>
+<div class="topbar">
+  <div class="dot" id="dot"></div>
+  <h1>Agent Replay</h1>
+  <span class="tag" id="t-run">-</span>
+  <span class="tag mono" id="t-date">-</span>
+  <div class="meta">
+    <span class="tag purple" id="t-model">-</span>
+    <span class="tag blue" id="t-tools">-</span>
+    <div class="hearts" id="hearts"></div>
+    <span class="tag mono" id="t-time">-</span>
+    <div class="pbar"><div class="pfill" id="pbar"></div></div>
+  </div>
+</div>
+<div class="chat" id="chat"><div class="info">Loading...</div></div>
+<script>
+var hp=10;
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+// Audio
+var actx=null;
+function tone(f,d,t,v){try{if(!actx)actx=new(window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();var o=actx.createOscillator(),g=actx.createGain();o.type=t||'square';o.frequency.value=f;g.gain.value=v||0.06;g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+d);o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+d)}catch(e){}}
+function sfxHit(){tone(100,.12,'sawtooth',.1);setTimeout(function(){tone(80,.08,'square',.07)},40)}
+function sfxOrb(){tone(800+Math.random()*400,.07,'sine',.04)}
+function sfxClick(){tone(600,.03,'square',.03)}
+function sfxWin(){[523,659,784,1047].forEach(function(f,i){setTimeout(function(){tone(f,.15,'sine',.06)},i*90)})}
+function sfxLose(){[400,350,280].forEach(function(f,i){setTimeout(function(){tone(f,.15,'sawtooth',.05)},i*100)})}
+
+function drawHearts(){
+  var el=document.getElementById('hearts');if(!el)return;
+  var h='';for(var i=0;i<5;i++){var c=hp>=(i+1)*2?'#e23030':hp>=i*2+1?'#992020':'#333';h+='<svg width="12" height="12" viewBox="0 0 10 9"><path d="M1 3Q1 1 3 1Q5 1 5 3Q5 1 7 1Q9 1 9 3Q9 5 5 8Q1 5 1 3Z" fill="'+c+'"/></svg> '}
+  el.innerHTML=h;
+}
+function damage(){
+  hp=Math.max(0,hp-2);drawHearts();sfxHit();
+  var d=document.getElementById('dmg');if(d){d.classList.add('on');setTimeout(function(){d.classList.remove('on')},150)}
+  var c=document.getElementById('chat');if(c){c.classList.add('shake');setTimeout(function(){c.classList.remove('shake')},300)}
+}
+
+var playing=null,abort=false;
+
+async function go(){
+  var chat=document.getElementById('chat');
+  try{
+    // Fetch latest
+    chat.innerHTML='<div class="info">Fetching runs...</div>';
+    var r=await fetch('/api/runs?_='+Date.now());
+    var runs=await r.json();
+    runs.sort(function(a,b){return b.filename.localeCompare(a.filename)});
+    if(!runs.length){chat.innerHTML='<div class="info">No runs yet</div>';setTimeout(go,5000);return}
+
+    var latest=runs[0];
+    chat.innerHTML='<div class="info">Loading '+latest.filename+'...</div>';
+
+    var r2=await fetch('/api/runs/'+latest.filename+'?_='+Date.now());
+    if(!r2.ok){chat.innerHTML='<div class="info">Error '+r2.status+'. Retrying...</div>';setTimeout(go,5000);return}
+    var data=await r2.json();
+    if(!data||!data.messages){chat.innerHTML='<div class="info">Bad data. Retrying...</div>';setTimeout(go,5000);return}
+
+    playing=latest.filename;abort=false;
+
+    // Topbar
+    var idx=runs.findIndex(function(x){return x.filename===latest.filename});
+    document.getElementById('t-run').textContent='Run #'+(runs.length-idx)+' / '+runs.length;
+    var m=latest.filename.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+    document.getElementById('t-date').textContent=m?m[1]+'-'+m[2]+'-'+m[3]+' '+m[4]+':'+m[5]+':'+m[6]:'';
+    document.getElementById('t-model').textContent=data.model||'?';
+    document.getElementById('t-tools').textContent=(data.toolCallCount||0)+' calls';
+    document.getElementById('t-time').textContent=((data.elapsedMs||0)/1000).toFixed(1)+'s';
+    document.getElementById('dot').className='dot';
+    hp=10;drawHearts();
+
+    // Parse events
+    var evts=[];
+    (data.messages||[]).forEach(function(msg){
+      if(!Array.isArray(msg.content))return;
+      msg.content.forEach(function(b){
+        if(msg.role==='user'&&b.type==='text')evts.push({t:'user',c:b.text});
+        else if(b.type==='mcp_tool_use')evts.push({t:'tool',n:b.name,c:JSON.stringify(b.input||{})});
+        else if(b.type==='mcp_tool_result'&&b.is_error)evts.push({t:'err',c:(typeof b.content==='string'?b.content:JSON.stringify(b.content||'')).slice(0,250)});
+        else if(b.type==='mcp_tool_result'&&!b.is_error)evts.push({t:'ok',c:(typeof b.content==='string'?b.content:JSON.stringify(b.content||'')).slice(0,200)});
+        else if(b.type==='server_tool_use')evts.push({t:'srch',c:JSON.stringify(b.input||{})});
+        else if(b.type==='text'&&b.text&&b.text.length>5&&msg.role==='assistant')evts.push({t:'ai',c:b.text.slice(0,400)});
+      });
+    });
+    if(data.verification)evts.push({t:'v',ok:data.verification.verified,s:data.verification.summary||''});
+
+    chat.innerHTML='';
+
+    // Play
+    for(var i=0;i<evts.length;i++){
+      if(abort)break;
+      var e=evts[i],h='';
+      if(e.t==='user'){h='<div class="msg msg-user"><div class="lb">TASK</div><div class="ct">'+esc(e.c)+'</div></div>';sfxClick()}
+      else if(e.t==='tool'){h='<div class="msg msg-tool"><div class="lb">TOOL '+esc(e.n)+'</div><div class="ct trunc" style="color:#8b949e">'+esc(e.c)+'</div></div>';sfxClick()}
+      else if(e.t==='ok'){h='<div class="msg msg-ok"><div class="lb">OK</div><div class="ct trunc">'+esc(e.c)+'</div></div>';sfxOrb()}
+      else if(e.t==='err'){h='<div class="msg msg-err"><div class="lb">ERROR</div><div class="ct">'+esc(e.c)+'</div></div>';damage()}
+      else if(e.t==='srch'){h='<div class="msg msg-srch">search '+esc(e.c)+'</div>'}
+      else if(e.t==='ai'){h='<div class="msg msg-ai"><div class="lb">CLAUDE</div><div class="ct">'+esc(e.c)+'</div></div>'}
+      else if(e.t==='v'){var vc=e.ok?'pass':'fail';h='<div class="msg msg-v '+vc+'">'+(e.ok?'VERIFIED':'FAILED')+'<br><span style="font-weight:400;font-size:12px">'+esc(e.s)+'</span></div>';if(e.ok)sfxWin();else{sfxLose();damage();damage()}}
+
+      if(h){chat.insertAdjacentHTML('beforeend',h);chat.scrollTop=chat.scrollHeight}
+      document.getElementById('pbar').style.width=((i+1)/evts.length*100)+'%';
+
+      var dl=1500;
+      if(e.t==='srch')dl=400;else if(e.t==='ok')dl=1000;else if(e.t==='tool')dl=1500;else if(e.t==='err')dl=2200;else if(e.t==='ai')dl=2500;else if(e.t==='user')dl=3000;else if(e.t==='v')dl=3500;
+      await sleep(dl);
+    }
+
+    if(!abort){
+      document.getElementById('dot').className='dot paused';
+      chat.insertAdjacentHTML('beforeend','<div class="info" style="margin-top:12px;border-top:1px solid #30363d;padding-top:12px">Replay complete — restarting...</div>');
+      chat.scrollTop=chat.scrollHeight;
+      await sleep(6000);
+    }
+    playing=null;abort=false;go();
+  }catch(err){
+    console.error('replay error:',err);
+    chat.innerHTML='<div class="info">Error: '+err+'. Retrying...</div>';
+    playing=null;abort=false;setTimeout(go,5000);
+  }
+}
+
+// Poll for new runs
+setInterval(async function(){
+  try{
+    var r=await fetch('/api/runs?_='+Date.now());
+    var runs=await r.json();
+    runs.sort(function(a,b){return b.filename.localeCompare(a.filename)});
+    if(runs.length&&runs[0].filename!==playing){abort=true}
+  }catch(e){}
+},8000);
+
+go();
+</script>
+</body>
+</html>
