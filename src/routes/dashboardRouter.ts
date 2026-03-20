@@ -310,9 +310,9 @@ const REPLAY_HTML = `<!DOCTYPE html>
   .tag.errors.zero { color: #3fb950; }
 
   /* XP bar */
-  .xp-bar { width: 140px; height: 8px; background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 0; overflow: hidden; position: relative; image-rendering: pixelated; }
-  .xp-fill { height: 100%; background: #7dff4f; transition: width 0.3s; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.3); }
-  .xp-label { position: absolute; top: -1px; left: 0; right: 0; text-align: center; font-size: 7px; font-weight: 700; color: #fff; text-shadow: 1px 1px 0 #000; line-height: 10px; }
+  .xp-bar { width: 160px; height: 14px; background: #1a1a1a; border: 2px solid #2a2a2a; border-radius: 2px; overflow: hidden; position: relative; box-shadow: inset 0 2px 4px rgba(0,0,0,0.5); }
+  .xp-fill { height: 100%; background: linear-gradient(180deg, #a4f74f 0%, #5cbf1a 40%, #4a9e15 100%); transition: width 0.4s ease; box-shadow: inset 0 1px 0 rgba(255,255,255,0.2); }
+  .xp-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #fff; text-shadow: 1px 1px 1px #000, -1px -1px 1px #000; letter-spacing: 0.5px; }
 
   /* Hearts */
   .hearts { display: flex; gap: 2px; align-items: center; }
@@ -432,9 +432,11 @@ async function fetchLatestFilename() {
 
 // Fetch full run detail
 async function fetchRunDetail(filename) {
+  // Ensure allRuns is populated
+  if (allRuns.length === 0) await fetchRuns();
   const res = await fetch('/api/runs/' + filename + '?t=' + Date.now());
   const data = await res.json();
-  const summary = allRuns.find(r => r.filename === filename);
+  const summary = allRuns.find(r => r.filename === filename) || { toolCallCount: data.toolCallCount || 0, errorCount: (data.errors || []).length, elapsedMs: data.elapsedMs || 0 };
   return { summary, detail: data };
 }
 
@@ -532,6 +534,7 @@ function renderEvent(ev) {
 }
 
 async function playReplay() {
+ try {
   // Always fetch the latest run
   const latest = await fetchLatestFilename();
   if (!latest) {
@@ -545,9 +548,11 @@ async function playReplay() {
   try {
     run = await fetchRunDetail(latest);
   } catch (e) {
+    console.error('Failed to load run:', e);
     setTimeout(playReplay, 5000);
     return;
   }
+  if (!run || !run.detail) { setTimeout(playReplay, 5000); return; }
 
   playingRun = latest;
   abortReplay = false;
@@ -623,6 +628,12 @@ async function playReplay() {
   playingRun = null;
   abortReplay = false;
   playReplay();
+ } catch (err) {
+  console.error('playReplay crashed, restarting in 5s:', err);
+  playingRun = null;
+  abortReplay = false;
+  setTimeout(playReplay, 5000);
+ }
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
