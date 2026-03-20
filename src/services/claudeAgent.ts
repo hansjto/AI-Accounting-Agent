@@ -70,7 +70,7 @@ export async function runAgent(
 
     const response = await (claude.beta.messages.create as Function)({
       model: 'claude-sonnet-4-6',
-      max_tokens: 16384,
+      max_tokens: 4096,
       betas: ['mcp-client-2025-11-20'],
       system: systemPrompt,
       mcp_servers: [

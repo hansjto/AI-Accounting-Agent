@@ -1,7 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 // ---------------------------------------------------------------------------
 // Base prompt — always loaded, always cached
@@ -283,10 +280,13 @@ Always use batch endpoints when creating more than one of the same resource.
 3. Trust 201 responses — do NOT verify with a GET after successful create
 4. Read error messages carefully and fix correctly on first retry
 5. Minimize total API calls — combine lookups when possible
+6. Make independent lookups IN PARALLEL (customer + employee + VAT + bank account in one turn)
+7. Do NOT write explanations or summaries — just call tools and stop
+8. Do NOT output text between tool calls unless absolutely necessary
+9. Every second counts — 5 minute timeout, efficiency bonus depends on speed
 
 The task prompt may be in any language including Norwegian, Nynorsk, Sami, English, or others.
-If the language is unfamiliar, translate the prompt to Norwegian internally first, then execute the task.
-Complete the task fully then stop.`,
+Complete the task fully then stop. Do not explain what you did.`,
   cache_control: { type: 'ephemeral' },
 };
 
@@ -436,26 +436,7 @@ const MODULES: Module[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Auto-generated API field reference — loaded from spec at startup
-// ---------------------------------------------------------------------------
-
-let API_REFERENCE_BLOCK: Anthropic.TextBlockParam | null = null;
-try {
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const refPath = resolve(__dirname, '../generated/api-reference.txt');
-  const refText = readFileSync(refPath, 'utf-8');
-  API_REFERENCE_BLOCK = {
-    type: 'text',
-    text: `## Complete API field reference (auto-generated from OpenAPI spec)\nUse these EXACT field names when creating/updating entities. Do NOT guess field names.\n\n${refText}`,
-    cache_control: { type: 'ephemeral' },
-  };
-  console.log(`[PROMPT] Loaded API reference: ${refText.length} chars`);
-} catch (err) {
-  console.warn(`[PROMPT] API reference not found, skipping`);
-}
-
-// ---------------------------------------------------------------------------
-// Build system prompt — base + API reference + any matched modules
+// Build system prompt — base + any matched modules
 // ---------------------------------------------------------------------------
 
 export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[] {
@@ -469,9 +450,5 @@ export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[
     console.log(`[PROMPT] Loaded modules: ${matched.map((_, i) => MODULES.indexOf(_)).join(', ')}`);
   }
 
-  const blocks: Anthropic.TextBlockParam[] = [BASE_BLOCK];
-  if (API_REFERENCE_BLOCK) blocks.push(API_REFERENCE_BLOCK);
-  blocks.push(...matched.map((m) => m.block));
-
-  return blocks;
+  return [BASE_BLOCK, ...matched.map((m) => m.block)];
 }
