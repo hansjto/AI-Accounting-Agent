@@ -1,4 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // ---------------------------------------------------------------------------
 // Base prompt — always loaded, always cached
@@ -422,7 +425,26 @@ const MODULES: Module[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Build system prompt — base + any matched modules
+// Auto-generated API field reference — loaded from spec at startup
+// ---------------------------------------------------------------------------
+
+let API_REFERENCE_BLOCK: Anthropic.TextBlockParam | null = null;
+try {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const refPath = resolve(__dirname, '../generated/api-reference.txt');
+  const refText = readFileSync(refPath, 'utf-8');
+  API_REFERENCE_BLOCK = {
+    type: 'text',
+    text: `## Complete API field reference (auto-generated from OpenAPI spec)\nUse these EXACT field names when creating/updating entities. Do NOT guess field names.\n\n${refText}`,
+    cache_control: { type: 'ephemeral' },
+  };
+  console.log(`[PROMPT] Loaded API reference: ${refText.length} chars`);
+} catch (err) {
+  console.warn(`[PROMPT] API reference not found, skipping`);
+}
+
+// ---------------------------------------------------------------------------
+// Build system prompt — base + API reference + any matched modules
 // ---------------------------------------------------------------------------
 
 export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[] {
@@ -436,5 +458,9 @@ export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[
     console.log(`[PROMPT] Loaded modules: ${matched.map((_, i) => MODULES.indexOf(_)).join(', ')}`);
   }
 
-  return [BASE_BLOCK, ...matched.map((m) => m.block)];
+  const blocks: Anthropic.TextBlockParam[] = [BASE_BLOCK];
+  if (API_REFERENCE_BLOCK) blocks.push(API_REFERENCE_BLOCK);
+  blocks.push(...matched.map((m) => m.block));
+
+  return blocks;
 }
