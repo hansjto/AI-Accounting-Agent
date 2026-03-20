@@ -28,6 +28,11 @@ dashboardRouter.get('/dashboard', (_req: Request, res: Response) => {
   res.type('html').send(DASHBOARD_HTML);
 });
 
+// Replay view — chat-style replay of the latest run
+dashboardRouter.get('/replay', (_req: Request, res: Response) => {
+  res.type('html').send(REPLAY_HTML);
+});
+
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -279,3 +284,245 @@ setInterval(fetchRuns, 10000);
 </script>
 </body>
 </html>`;
+
+const REPLAY_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Replay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  .topbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .topbar h1 { font-size: 15px; font-weight: 600; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; animation: pulse 2s infinite; }
+  .live-dot.playing { background: #3fb950; }
+  .live-dot.paused { background: #d29922; animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .topbar-meta { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  .tag { background: #1f2937; border: 1px solid #30363d; padding: 2px 10px; border-radius: 4px; font-size: 11px; }
+  .tag.model { color: #d2a8ff; }
+  .tag.time { color: #93c5fd; font-family: monospace; }
+  .tag.tools { color: #58a6ff; }
+  .tag.errors { color: #f85149; }
+  .tag.errors.zero { color: #3fb950; }
+  .progress-bar { width: 120px; height: 4px; background: #30363d; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #58a6ff; transition: width 0.3s; }
+
+  .chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; scroll-behavior: smooth; }
+
+  .msg { max-width: 90%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; animation: fadeIn 0.3s ease; opacity: 0; animation-fill-mode: forwards; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  .msg-user { align-self: flex-end; background: #1a3a5c; border: 1px solid #264b73; border-bottom-right-radius: 4px; }
+  .msg-user .label { color: #58a6ff; font-weight: 600; font-size: 11px; margin-bottom: 4px; }
+
+  .msg-assistant { align-self: flex-start; background: #1c1c2e; border: 1px solid #2d2d44; border-bottom-left-radius: 4px; }
+  .msg-assistant .label { color: #d2a8ff; font-weight: 600; font-size: 11px; margin-bottom: 4px; }
+
+  .msg-tool { align-self: flex-start; background: #0d2137; border: 1px solid #1a3a5c; border-left: 3px solid #58a6ff; border-radius: 6px; font-family: monospace; font-size: 12px; max-width: 95%; }
+  .msg-tool .label { color: #58a6ff; font-weight: 700; font-size: 11px; margin-bottom: 2px; }
+  .msg-tool .tool-input { color: #8b949e; word-break: break-all; }
+
+  .msg-result { align-self: flex-start; background: #0d1a0d; border: 1px solid #1a3a1a; border-left: 3px solid #3fb950; border-radius: 6px; font-family: monospace; font-size: 11px; max-width: 95%; color: #8b949e; }
+  .msg-result .label { color: #3fb950; font-weight: 700; font-size: 11px; margin-bottom: 2px; }
+
+  .msg-error { align-self: flex-start; background: #1a0d0d; border: 1px solid #3a1a1a; border-left: 3px solid #f85149; border-radius: 6px; font-family: monospace; font-size: 11px; max-width: 95%; color: #f85149; }
+  .msg-error .label { color: #f85149; font-weight: 700; font-size: 11px; margin-bottom: 2px; }
+
+  .msg-search { align-self: flex-start; background: #161b22; border: 1px solid #30363d; border-left: 3px solid #8b949e; border-radius: 6px; font-family: monospace; font-size: 11px; color: #8b949e; font-style: italic; padding: 6px 12px; }
+
+  .msg-system { align-self: center; background: #161b22; border: 1px solid #30363d; border-radius: 20px; font-size: 12px; color: #8b949e; padding: 6px 16px; text-align: center; }
+
+  .msg-verify { align-self: center; padding: 12px 24px; border-radius: 12px; font-size: 14px; font-weight: 600; text-align: center; }
+  .msg-verify.pass { background: #0d2a0d; border: 2px solid #3fb950; color: #3fb950; }
+  .msg-verify.fail { background: #2a0d0d; border: 2px solid #f85149; color: #f85149; }
+
+  .content { white-space: pre-wrap; word-break: break-word; }
+  .truncated { max-height: 120px; overflow: hidden; position: relative; }
+  .truncated::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 30px; background: linear-gradient(transparent, #0d2137); }
+
+  .waiting { align-self: center; color: #8b949e; font-size: 12px; padding: 20px; }
+  .waiting .dots::after { content: ''; animation: dots 1.5s infinite; }
+  @keyframes dots { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} }
+
+  .restart-notice { align-self: center; color: #8b949e; font-size: 12px; padding: 16px; border-top: 1px solid #30363d; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="live-dot playing" id="status-dot"></div>
+  <h1 id="title">Agent Replay</h1>
+  <div class="topbar-meta">
+    <span class="tag model" id="m-model">—</span>
+    <span class="tag tools" id="m-tools">— calls</span>
+    <span class="tag errors zero" id="m-errors">— errors</span>
+    <span class="tag time" id="m-time">—s</span>
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+  </div>
+</div>
+
+<div class="chat" id="chat">
+  <div class="waiting">Loading latest run<span class="dots"></span></div>
+</div>
+
+<script>
+const STEP_DELAY = 800;  // ms between chat messages
+const PAUSE_AFTER = 5000; // ms pause after replay finishes before restarting
+let events = [];
+let runMeta = {};
+let currentRun = null;
+
+async function loadLatestRun() {
+  const res = await fetch('/api/runs');
+  const runs = await res.json();
+  if (runs.length === 0) return null;
+
+  const latest = runs[0];
+  if (latest.filename === currentRun) return null; // same run
+
+  const detail = await fetch('/api/runs/' + latest.filename);
+  const data = await detail.json();
+  currentRun = latest.filename;
+  return { summary: latest, detail: data };
+}
+
+function parseEvents(data) {
+  const evts = [];
+  const messages = data.messages || [];
+
+  // User message first
+  for (const msg of messages) {
+    if (msg.role === 'user' && Array.isArray(msg.content)) {
+      const text = msg.content.find(b => b.type === 'text');
+      if (text) evts.push({ type: 'user', content: text.text });
+      const docs = msg.content.filter(b => b.type === 'document' || b.type === 'image');
+      if (docs.length > 0) evts.push({ type: 'system', content: docs.length + ' file(s) attached' });
+      break;
+    }
+  }
+
+  // Assistant turns
+  for (const msg of messages) {
+    if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block.type === 'mcp_tool_use') {
+        evts.push({ type: 'tool', name: block.name, input: JSON.stringify(block.input || {}, null, 2) });
+      } else if (block.type === 'mcp_tool_result') {
+        const preview = typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
+        if (block.is_error) {
+          evts.push({ type: 'error', content: preview.slice(0, 300) });
+        } else {
+          evts.push({ type: 'result', content: preview.slice(0, 250) });
+        }
+      } else if (block.type === 'server_tool_use') {
+        evts.push({ type: 'search', content: JSON.stringify(block.input || {}) });
+      } else if (block.type === 'text' && block.text && block.text.length > 5) {
+        evts.push({ type: 'assistant', content: block.text });
+      }
+    }
+  }
+
+  // Verification
+  if (data.verification) {
+    evts.push({ type: 'verify', verified: data.verification.verified, summary: data.verification.summary || '' });
+  }
+
+  return evts;
+}
+
+function renderEvent(ev) {
+  switch (ev.type) {
+    case 'user':
+      return '<div class="msg msg-user"><div class="label">TASK</div><div class="content">' + esc(ev.content) + '</div></div>';
+    case 'assistant':
+      return '<div class="msg msg-assistant"><div class="label">CLAUDE</div><div class="content">' + esc(ev.content.slice(0, 500)) + '</div></div>';
+    case 'tool':
+      return '<div class="msg msg-tool"><div class="label">TOOL ' + esc(ev.name) + '</div><div class="tool-input truncated">' + esc(ev.input) + '</div></div>';
+    case 'result':
+      return '<div class="msg msg-result"><div class="label">RESULT</div><div class="content truncated">' + esc(ev.content) + '</div></div>';
+    case 'error':
+      return '<div class="msg msg-error"><div class="label">ERROR</div><div class="content">' + esc(ev.content) + '</div></div>';
+    case 'search':
+      return '<div class="msg msg-search">tool_search ' + esc(ev.content) + '</div>';
+    case 'system':
+      return '<div class="msg msg-system">' + esc(ev.content) + '</div>';
+    case 'verify':
+      const cls = ev.verified ? 'pass' : 'fail';
+      const icon = ev.verified ? 'VERIFIED' : 'NOT VERIFIED';
+      return '<div class="msg msg-verify ' + cls + '">' + icon + '<br><span style="font-weight:400;font-size:12px">' + esc(ev.summary) + '</span></div>';
+    default:
+      return '';
+  }
+}
+
+async function playReplay() {
+  const run = await loadLatestRun();
+  if (!run) {
+    // Check again in 10s
+    setTimeout(playReplay, 10000);
+    return;
+  }
+
+  events = parseEvents(run.detail);
+  runMeta = run;
+
+  // Update topbar
+  document.getElementById('m-model').textContent = run.detail.model || '?';
+  document.getElementById('m-tools').textContent = run.summary.toolCallCount + ' calls';
+  const errEl = document.getElementById('m-errors');
+  errEl.textContent = run.summary.errorCount + ' errors';
+  errEl.className = 'tag errors' + (run.summary.errorCount === 0 ? ' zero' : '');
+  document.getElementById('m-time').textContent = (run.summary.elapsedMs / 1000).toFixed(1) + 's';
+  document.getElementById('status-dot').className = 'live-dot playing';
+
+  const chat = document.getElementById('chat');
+  chat.innerHTML = '';
+
+  // Play events one by one
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    const html = renderEvent(ev);
+    if (!html) continue;
+
+    chat.insertAdjacentHTML('beforeend', html);
+    chat.scrollTop = chat.scrollHeight;
+
+    // Update progress
+    document.getElementById('progress').style.width = ((i + 1) / events.length * 100) + '%';
+
+    // Variable delay: shorter for search/results, longer for tools/text
+    let delay = STEP_DELAY;
+    if (ev.type === 'search') delay = 200;
+    else if (ev.type === 'result') delay = 400;
+    else if (ev.type === 'error') delay = 1000;
+    else if (ev.type === 'assistant') delay = 1500;
+    else if (ev.type === 'user') delay = 2000;
+    else if (ev.type === 'verify') delay = 2000;
+
+    await sleep(delay);
+  }
+
+  // Done — show restart notice
+  document.getElementById('status-dot').className = 'live-dot paused';
+  chat.insertAdjacentHTML('beforeend', '<div class="restart-notice">Replay complete — restarting in 5s...</div>');
+  chat.scrollTop = chat.scrollHeight;
+
+  await sleep(PAUSE_AFTER);
+
+  // Check for new run or replay same
+  currentRun = null;
+  playReplay();
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+playReplay();
+</script>
+</body>
+</html>`;
+
