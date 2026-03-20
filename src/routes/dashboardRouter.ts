@@ -370,48 +370,36 @@ const REPLAY_HTML = `<!DOCTYPE html>
 </div>
 
 <script>
-const STEP_DELAY = 1500; // ms between chat messages (base)
-const PAUSE_AFTER = 6000; // ms pause after replay finishes before restarting
-const NEW_RUN_CHECK_INTERVAL = 8000; // check for new runs during replay
-let events = [];
-let runMeta = {};
-let currentRun = null;
-let latestKnown = null; // track the latest filename we know about
-let abortReplay = false; // signal to interrupt current replay
+const STEP_DELAY = 1500;
+const PAUSE_AFTER = 6000;
+let playingRun = null;  // filename currently being played
+let abortReplay = false;
 
-// Always fetch the latest run filename
+// Fetch the latest run filename (cache-busted)
 async function fetchLatestFilename() {
   try {
-    const res = await fetch('/api/runs');
+    const res = await fetch('/api/runs?t=' + Date.now());
     const runs = await res.json();
-    if (runs.length === 0) return null;
-    return runs[0].filename;
+    return runs.length > 0 ? runs[0].filename : null;
   } catch { return null; }
 }
 
-async function loadLatestRun() {
-  const latest = await fetchLatestFilename();
-  if (!latest) return null;
-  latestKnown = latest;
-  if (latest === currentRun) return null;
-
-  const detail = await fetch('/api/runs/' + latest);
-  const data = await detail.json();
-  const res2 = await fetch('/api/runs');
+// Fetch full run detail
+async function fetchRunDetail(filename) {
+  const res = await fetch('/api/runs/' + filename + '?t=' + Date.now());
+  const data = await res.json();
+  const res2 = await fetch('/api/runs?t=' + Date.now());
   const runs = await res2.json();
-  const summary = runs.find(r => r.filename === latest);
-  currentRun = latest;
-  return { summary, detail: data };
+  return { summary: runs.find(r => r.filename === filename), detail: data };
 }
 
-// Background poller: check for new runs and interrupt replay if found
+// Background poller: always check for newer runs and interrupt if found
 setInterval(async () => {
   const latest = await fetchLatestFilename();
-  if (latest && latest !== latestKnown && latest !== currentRun) {
-    latestKnown = latest;
-    abortReplay = true; // signal the playing loop to stop
+  if (latest && latest !== playingRun) {
+    abortReplay = true;
   }
-}, NEW_RUN_CHECK_INTERVAL);
+}, 8000);
 
 function parseEvents(data) {
   const evts = [];
@@ -483,39 +471,44 @@ function renderEvent(ev) {
 }
 
 async function playReplay() {
-  const run = await loadLatestRun();
-  if (!run) {
-    // Check again in 10s
-    setTimeout(playReplay, 10000);
+  // Always fetch the latest run
+  const latest = await fetchLatestFilename();
+  if (!latest) {
+    document.getElementById('chat').innerHTML = '<div class="waiting">No runs yet. Submit a task to see the replay.<span class="dots"></span></div>';
+    setTimeout(playReplay, 5000);
     return;
   }
 
-  events = parseEvents(run.detail);
-  runMeta = run;
+  // Load it (even if same as before — we replay in a loop)
+  let run;
+  try {
+    run = await fetchRunDetail(latest);
+  } catch (e) {
+    setTimeout(playReplay, 5000);
+    return;
+  }
+
+  playingRun = latest;
+  abortReplay = false;
+
+  const events = parseEvents(run.detail);
 
   // Update topbar
   document.getElementById('m-model').textContent = run.detail.model || '?';
-  document.getElementById('m-tools').textContent = run.summary.toolCallCount + ' calls';
+  document.getElementById('m-tools').textContent = (run.summary?.toolCallCount || 0) + ' calls';
   const errEl = document.getElementById('m-errors');
-  errEl.textContent = run.summary.errorCount + ' errors';
-  errEl.className = 'tag errors' + (run.summary.errorCount === 0 ? ' zero' : '');
-  document.getElementById('m-time').textContent = (run.summary.elapsedMs / 1000).toFixed(1) + 's';
+  const errCount = run.summary?.errorCount || 0;
+  errEl.textContent = errCount + ' errors';
+  errEl.className = 'tag errors' + (errCount === 0 ? ' zero' : '');
+  document.getElementById('m-time').textContent = ((run.summary?.elapsedMs || 0) / 1000).toFixed(1) + 's';
   document.getElementById('status-dot').className = 'live-dot playing';
 
   const chat = document.getElementById('chat');
   chat.innerHTML = '';
 
-  abortReplay = false;
-
   // Play events one by one
   for (let i = 0; i < events.length; i++) {
-    // Check if a new run arrived — interrupt and switch
-    if (abortReplay) {
-      abortReplay = false;
-      currentRun = null;
-      playReplay();
-      return;
-    }
+    if (abortReplay) break; // new run arrived — stop immediately
 
     const ev = events[i];
     const html = renderEvent(ev);
@@ -524,10 +517,8 @@ async function playReplay() {
     chat.insertAdjacentHTML('beforeend', html);
     chat.scrollTop = chat.scrollHeight;
 
-    // Update progress
     document.getElementById('progress').style.width = ((i + 1) / events.length * 100) + '%';
 
-    // Variable delay: longer for readability
     let delay = STEP_DELAY;
     if (ev.type === 'search') delay = 500;
     else if (ev.type === 'result') delay = 1200;
@@ -541,15 +532,17 @@ async function playReplay() {
     await sleep(delay);
   }
 
-  // Done — show restart notice
-  document.getElementById('status-dot').className = 'live-dot paused';
-  chat.insertAdjacentHTML('beforeend', '<div class="restart-notice">Replay complete — restarting...</div>');
-  chat.scrollTop = chat.scrollHeight;
+  if (!abortReplay) {
+    // Finished normally — pause then restart
+    document.getElementById('status-dot').className = 'live-dot paused';
+    chat.insertAdjacentHTML('beforeend', '<div class="restart-notice">Replay complete — restarting...</div>');
+    chat.scrollTop = chat.scrollHeight;
+    await sleep(PAUSE_AFTER);
+  }
 
-  await sleep(PAUSE_AFTER);
-
-  // Check for new run or replay same
-  currentRun = null;
+  // Reset and go again (will pick up new run if available)
+  playingRun = null;
+  abortReplay = false;
   playReplay();
 }
 
