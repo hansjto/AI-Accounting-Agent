@@ -38,7 +38,7 @@ export async function logResult(
 
   const payload = {
     prompt,
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-6',
     elapsedMs,
     toolCallCount: agentResult.toolCallCount,
     errors: agentResult.errors,

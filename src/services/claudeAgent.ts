@@ -69,7 +69,7 @@ export async function runAgent(
     }
 
     const response = await (claude.beta.messages.create as Function)({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-6',
       max_tokens: 16384,
       betas: ['mcp-client-2025-11-20'],
       system: systemPrompt,
@@ -175,7 +175,7 @@ export async function verifySandboxResult(
 
   try {
     const response = await claude.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-6',
       max_tokens: 512,
       system: 'You are verifying whether an accounting task was completed successfully in Tripletex. Be concise.',
       messages: [

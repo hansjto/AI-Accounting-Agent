@@ -162,6 +162,16 @@ Do steps 1-3 in parallel where possible to minimize round trips.
 3. PUT /order/{id}/:invoice → get invoice id from response value.id
 4. PUT /invoice/{id}/:send?sendType=EMAIL
 
+**Fixed-price project — partial/a-konto invoicing:**
+When asked to invoice a percentage of a fixed-price project:
+1. Create the project with isFixedPrice: true, fixedprice: <amount>
+2. Create an order linked to the project: { customer: {id}, project: {id}, orderDate, deliveryDate }
+3. Add order line with the partial amount — use unitPriceExcludingVatCurrency for the amount EXCLUDING VAT
+   IMPORTANT: If the prompt says "invoice 50% of the fixed price" (e.g. 50% of 266550 = 133275),
+   the 133275 IS the amount excluding VAT. Do NOT add VAT type unless the prompt explicitly says the amount includes VAT.
+   Use vatType only when the task specifically mentions VAT/MVA, otherwise omit it for a-konto invoicing.
+4. PUT /order/{id}/:invoice?invoiceDate=YYYY-MM-DD → creates the invoice
+
 **Travel expense full flow:**
 1. POST /travelExpense → { employee: {id}, from, to, description }
 2. POST /travelExpense/cost or /travelExpense/mileageAllowance
