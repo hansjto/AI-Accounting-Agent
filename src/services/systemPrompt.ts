@@ -47,8 +47,11 @@ The code runs in an async context. \`api\` is pre-authenticated. Use \`console.l
   address: { addressLine1, postalCode, city } }
 - CRITICAL: department and userType are REQUIRED — omitting them returns 422.
 - userType values: "STANDARD", "EXTENDED", "NO_ACCESS". Use "STANDARD" for normal employees.
-  For admin/kontoadministrator: use "STANDARD" and grant entitlements via PUT /employee/entitlements/:grantEntitlementsByTemplate.
+  For admin/kontoadministrator: use "STANDARD" and grant entitlements:
+  \`api.put('/employee/entitlement/:grantEntitlementsByTemplate', {}, { employeeId: empId, template: 'ALL_PRIVILEGES' })\`
 - GET /department?fields=id,name&count=1 first to get a valid department id.
+- To create employment: \`api.post('/employee/employment', { employee: {id}, startDate, ... })\`
+  Then details: \`api.post('/employee/employment/details', { employment: {id}, date, percentageOfFullTimeEquivalent, annualSalary })\`
 
 **Product** POST /product:
 { name (R), number, description, costExcludingVatCurrency, priceExcludingVatCurrency,
@@ -84,6 +87,11 @@ The code runs in an async context. \`api\` is pre-authenticated. Use \`console.l
   3. Retry the invoice creation.
 - \`api.put('/invoice/{id}/:createCreditNote', {}, { date: 'YYYY-MM-DD' })\` → creates credit note
   The credit note date MUST be on or after the original invoice date.
+
+**Finding overdue invoices:**
+  GET /invoice?invoiceDateFrom=2020-01-01&invoiceDateTo=YYYY-MM-DD&fields=id,invoiceNumber,invoiceDate,invoiceDueDate,amountCurrency,amountOutstanding,customer
+  Filter: invoiceDueDate < today AND amountOutstanding > 0
+  NOTE: The field is "invoiceDueDate" (NOT "paymentDeadline" — that doesn't exist).
 
 **CRITICAL — Invoice payment type lookup:**
   Use GET /invoice/paymentType (NOT /ledger/paymentTypeOut — that is for outgoing supplier payments).
@@ -121,7 +129,7 @@ The code runs in an async context. \`api\` is pre-authenticated. Use \`console.l
 { name, number, projectManager: {id} (R), startDate (R), customer: {id}, endDate,
   description, isInternal, department: {id} }
 - ALWAYS grant entitlements BEFORE creating a project:
-  \`api.put('/employee/entitlements/:grantEntitlementsByTemplate', {}, { employeeId, template: 'ALL_PRIVILEGES' })\`
+  \`api.put('/employee/entitlement/:grantEntitlementsByTemplate', {}, { employeeId, template: 'ALL_PRIVILEGES' })\`
 
 **Project activity** — link activity to project:
   \`api.post('/project/{projectId}/projectActivity', { name: "Activity name", activityType: "PROJECT_GENERAL_ACTIVITY" })\`
