@@ -198,7 +198,7 @@ All tools are pre-authenticated. Use them inside code_execution Python code.
 2. Find expense account + accounts payable (2400) + incoming VAT type
 3. POST /ledger/voucher with postings:
    - Row 1: expense account, amount = NET, vatType = incoming VAT {id}
-   - Row 2: account 2400, amount = -GROSS, supplier: {id}
+   - Row 2: account 2400, amount = -GROSS, supplier: {id} ← CRITICAL: MUST include supplier:{id} or the invoice won't be linked!
    Tripletex auto-calculates VAT. Do NOT add manual VAT row.
    Include vendorInvoiceNumber on the voucher.
 
