@@ -41,7 +41,12 @@ Write plain JavaScript. Use \`console.log()\` to print results. \`api\` is pre-a
   physicalAddress: { addressLine1, addressLine2, postalCode, city },
   invoiceSendMethod: "EMAIL"|"EHF"|"EFAKTURA"|"AVTALEGIRO"|"VIPPS"|"PAPER"|"MANUAL",
   currency: {id}, department: {id}, customerNumber }
-- Only name is required. Use postalAddress for mailing address, physicalAddress for physical location.
+- Only name is required.
+
+**Supplier** POST /supplier:
+{ name (R), organizationNumber, email, phoneNumber,
+  postalAddress: { addressLine1, postalCode, city } }
+- Do NOT include bankAccounts in the create body — add bank accounts separately after creation.
 
 **Employee** POST /employee:
 { firstName, lastName, email, department: {id} (R), userType (R),
@@ -51,9 +56,10 @@ Write plain JavaScript. Use \`console.log()\` to print results. \`api\` is pre-a
 - userType values: "STANDARD", "EXTENDED", "NO_ACCESS". Use "STANDARD" for normal employees.
   For admin/kontoadministrator: use "STANDARD" and grant entitlements:
   \`api.put('/employee/entitlement/:grantEntitlementsByTemplate', {}, { employeeId: empId, template: 'ALL_PRIVILEGES' })\`
+  PATH IS SINGULAR: /employee/entitlement (NOT /employee/entitlements)
 - GET /department?fields=id,name&count=1 first to get a valid department id.
-- To create employment: \`api.post('/employee/employment', { employee: {id}, startDate, ... })\`
-  Then details: \`api.post('/employee/employment/details', { employment: {id}, date, percentageOfFullTimeEquivalent, annualSalary })\`
+- To create employment: \`api.post('/employee/employment', { employee: {id: empId}, startDate: 'YYYY-MM-DD' })\`
+  Then details: \`api.post('/employee/employment/details', { employment: {id: empId}, date: 'YYYY-MM-DD', percentageOfFullTimeEquivalent: 100, annualSalary: N })\`
 
 **Product** POST /product:
 { name (R), number, description, costExcludingVatCurrency, priceExcludingVatCurrency,
@@ -90,6 +96,11 @@ Write plain JavaScript. Use \`console.log()\` to print results. \`api\` is pre-a
 - \`api.put('/invoice/{id}/:createCreditNote', {}, { date: 'YYYY-MM-DD' })\` → creates credit note
   The credit note date MUST be on or after the original invoice date.
 
+**Reversing a payment (bank returned payment):**
+  There is NO GET /invoice/payment endpoint. To reverse a payment that was returned by the bank:
+  Find the payment voucher via GET /ledger/posting?dateFrom=...&dateTo=...&customerId={id}
+  Then reverse it: \`api.put('/ledger/voucher/{voucherId}/:reverse', {}, { date: TODAY })\`
+
 **Finding overdue invoices:**
   GET /invoice?invoiceDateFrom=2020-01-01&invoiceDateTo=YYYY-MM-DD&fields=id,invoiceNumber,invoiceDate,invoiceDueDate,amountCurrency,amountOutstanding,customer
   Filter: invoiceDueDate < today AND amountOutstanding > 0
@@ -121,6 +132,8 @@ Write plain JavaScript. Use \`console.log()\` to print results. \`api\` is pre-a
   → GET /travelExpense/rate?rateCategoryId={id}&type=PER_DIEM → use first result as rateType
 - NEVER use countryCode. Do NOT pass rate — let Tripletex calculate it.
 - overnightAccommodation: "HOTEL"|"NONE"|"BOARDING_HOUSE_WITHOUT_COOKING"|"BOARDING_HOUSE_WITH_COOKING"
+- Valid fields for rateCategory: id,name (NOT description — causes 400)
+- Valid fields for rate: id,name (NOT description — causes 400)
 
 **MileageAllowance** POST /travelExpense/mileageAllowance:
 { travelExpense: {id} (R), date (R), departureLocation (R), destination (R), km, isCompanyCar }
@@ -144,6 +157,9 @@ Write plain JavaScript. Use \`console.log()\` to print results. \`api\` is pre-a
   freeAccountingDimension1: {id}, freeAccountingDimension2: {id}, freeAccountingDimension3: {id} }] }
 - Each posting MUST have "row" field (integer, starting at 1).
 - The API response shows amount=0 — this is a DISPLAY ISSUE, amounts ARE saved. Do NOT recreate.
+- CRITICAL: Postings to account 1500 (kundefordringer) REQUIRE customer: {id} on the posting.
+  Postings to account 2400 (leverandørgjeld) REQUIRE supplier: {id} on the posting.
+  Omitting these causes 422 "Kunde mangler" / "Leverandør mangler".
 - CORRECTION VOUCHERS:
   - Do NOT add vatType on correction postings unless correcting VAT specifically.
   - Use the SAME counter-account as the original voucher.
@@ -192,7 +208,7 @@ POST /salary/transaction → { date, year, month, payslips: [{ employee: {id}, s
 
 ## Example: Create invoice with 2 products
 
-\`\`\`typescript
+\`\`\`javascript
 // Parallel lookups
 const [custRes, prod1Res, prod2Res, vatRes, bankRes] = await Promise.all([
   api.get('/customer', { organizationNumber: '123456789', fields: 'id,name' }),
