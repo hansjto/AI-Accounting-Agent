@@ -159,10 +159,9 @@ export async function runAgent(
       params.container = containerId;
     }
 
-    // Use non-streaming with explicit timeout to get container field
-    const response = await (claude.messages.create as Function)({
-      ...params,
-      timeout: 300000, // 5 min timeout
+    // Use non-streaming — the SDK handles timeout internally
+    const response = await claude.messages.create(params, {
+      timeout: 300000, // 5 min request timeout
     }) as any;
 
     // Track container for reuse
