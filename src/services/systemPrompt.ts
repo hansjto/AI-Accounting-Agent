@@ -209,7 +209,12 @@ All tools are pre-authenticated. Use them inside code_execution Python code.
 **Salary / Payroll:**
 POST /salary/transaction → { date, year, month, payslips: [{ employee: {id}, specifications: [{ salaryType: {id}, rate, count: 1, amount }] }] }
 - Fallback to manual voucher if salary API returns 422 (no employment contract):
-  Debit 5000 (salary expense), Credit 2910 (salary payable). REQUIRE employee: {id} on EVERY posting.
+  REQUIRE employee: {id} on EVERY posting on salary accounts.
+  IMPORTANT: Create SEPARATE postings for each salary component:
+  - 5000 (Lønn) debit for base salary amount, with employee:{id}
+  - 5001 (Bonus/tillegg) debit for bonus amount (if any), with employee:{id}
+  - 2910 (Skyldig lønn) credit for TOTAL amount, with employee:{id}
+  Do NOT combine base salary and bonus into one posting — they must be separate.
 
 **Accounting dimensions:**
 - Search first: GET /ledger/accountingDimensionName?fields=id,dimensionName (avoid 422 "Navnet er i bruk")
