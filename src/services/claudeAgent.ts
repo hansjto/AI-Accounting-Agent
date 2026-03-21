@@ -1,23 +1,83 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TripletexApi } from './tripletexApi.js';
-import { extractCode, executeCode } from './codeExecutor.js';
 import type { TripletexCredentials } from '../types.js';
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const AGENT_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min
 
-// Use streaming to avoid SDK timeout with high max_tokens
-async function createMessage(params: {
-  model: string;
-  max_tokens: number;
-  system: any;
-  messages: any[];
-}): Promise<Anthropic.Message> {
-  const stream = claude.messages.stream(params);
-  return await stream.finalMessage();
-}
+// ---------------------------------------------------------------------------
+// Tool definitions — 5 thin Tripletex tools + code_execution
+// ---------------------------------------------------------------------------
+
+const TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'tripletex_get',
+    description: 'GET request to Tripletex API. Returns parsed JSON. Use for searching/fetching entities.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API path e.g. /customer, /invoice, /ledger/account' },
+        params: { type: 'object', description: 'Query parameters e.g. {fields: "id,name", count: 100, number: 1920}' },
+      },
+      required: ['path'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'tripletex_post',
+    description: 'POST request to Tripletex API. Returns parsed JSON. Use for creating entities.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API path e.g. /customer, /employee, /ledger/voucher' },
+        body: { type: 'object', description: 'Request body with entity fields' },
+      },
+      required: ['path'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'tripletex_put',
+    description: 'PUT request to Tripletex API. Returns parsed JSON. Use for updating entities and action endpoints (/:action).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API path e.g. /customer/{id}, /invoice/{id}/:send' },
+        body: { type: 'object', description: 'Request body (use {} for action endpoints)' },
+        params: { type: 'object', description: 'Query parameters (for action endpoints like /:payment)' },
+      },
+      required: ['path'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'tripletex_del',
+    description: 'DELETE request to Tripletex API. Use for deleting entities.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API path e.g. /travelExpense/{id}' },
+      },
+      required: ['path'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'tripletex_post_list',
+    description: 'POST array body to Tripletex /list endpoints. Use for batch creating multiple entities.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: { type: 'string', description: 'API list path e.g. /order/orderline/list' },
+        items: { type: 'array', description: 'Array of entities to create', items: { type: 'object' } },
+      },
+      required: ['path', 'items'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,13 +88,10 @@ export interface AgentResult {
   errors: Array<{ tool: string; status: number }>;
   messages: any[];
   systemPrompt: any[];
-  generatedCode?: string;
-  executionLogs?: string[];
-  retried?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Main agent — code-execution approach
+// Main agent — programmatic tool calling
 // ---------------------------------------------------------------------------
 
 export async function runAgent(
@@ -45,6 +102,7 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const startTime = Date.now();
   const systemPrompt = buildSystemPrompt(prompt);
+  const api = new TripletexApi(credentials);
 
   // Build user message with attachments
   const content: any[] = [];
@@ -74,117 +132,141 @@ export async function runAgent(
   content.push({ type: 'text', text: prompt });
 
   const messages: any[] = [{ role: 'user', content }];
+  let containerId: string | undefined;
 
-  // --- Turn 1: Generate code ---
-  console.log(`[AGENT] Calling Claude to generate code...`);
-  const response = await createMessage({
-    model: 'claude-opus-4-6',
-    max_tokens: 32768,
-    system: systemPrompt,
-    messages,
-  });
+  // Tool-use loop
+  while (true) {
+    if (Date.now() - startTime > AGENT_TIMEOUT_MS) {
+      console.warn(`[TIMEOUT] Agent loop exceeded ${AGENT_TIMEOUT_MS / 1000}s limit`);
+      break;
+    }
 
-  const responseText = response.content.find((b) => b.type === 'text')?.text ?? '';
-  const code = extractCode(responseText);
-  const elapsed1 = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[AGENT] Code generated in ${elapsed1}s (${code.length} chars)`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[AGENT] Calling Claude (${elapsed}s elapsed, ${api.callLog.length} API calls so far)...`);
 
-  // --- Execute code ---
-  const api = new TripletexApi(credentials);
-  console.log(`[AGENT] Executing code...`);
-  const execResult = await executeCode(code, api);
+    const params: any = {
+      model: 'claude-opus-4-6',
+      max_tokens: 16384,
+      system: systemPrompt,
+      messages,
+      tools: [
+        { type: 'code_execution_20260120', name: 'code_execution' },
+        ...TOOLS,
+      ],
+    };
 
-  const elapsed2 = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[AGENT] Execution done in ${elapsed2}s — success=${execResult.success} calls=${api.callLog.length} errors=${api.getErrorCount()}`);
+    if (containerId) {
+      params.container = containerId;
+    }
 
-  if (execResult.logs.length > 0) {
-    console.log(`[AGENT LOGS] ${execResult.logs.join('\n')}`);
-  }
+    // Use streaming to avoid SDK timeout
+    const stream = claude.messages.stream(params);
+    const response = await stream.finalMessage() as any;
 
-  if (execResult.success) {
+    // Track container for reuse
+    if (response.container?.id) {
+      containerId = response.container.id;
+    }
+
+    // Log activity
+    for (const block of response.content) {
+      if (block.type === 'tool_use') {
+        const callerType = block.caller?.type ?? 'direct';
+        console.log(`[TOOL] ${block.name} (${callerType}) ${JSON.stringify(block.input).slice(0, 200)}`);
+      } else if (block.type === 'server_tool_use') {
+        console.log(`[CODE_EXEC] Writing Python code...`);
+      } else if (block.type === 'code_execution_tool_result') {
+        const result = block.content;
+        if (result?.stdout) console.log(`[CODE_STDOUT] ${result.stdout.slice(0, 500)}`);
+        if (result?.stderr) console.log(`[CODE_STDERR] ${result.stderr.slice(0, 500)}`);
+      } else if (block.type === 'text' && block.text?.trim()) {
+        console.log(`[TEXT] ${block.text.slice(0, 200)}`);
+      }
+    }
+
+    const elapsed2 = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(`[AGENT] stop_reason=${response.stop_reason} elapsed=${elapsed2}s`);
+
     messages.push({ role: 'assistant', content: response.content });
-    return buildResult(api, code, execResult.logs, false, messages, systemPrompt);
+
+    // Check if we're done
+    if (response.stop_reason === 'end_turn') break;
+
+    // Fulfill tool calls
+    if (response.stop_reason === 'tool_use') {
+      const toolResults: any[] = [];
+
+      for (const block of response.content) {
+        if (block.type === 'tool_use') {
+          const result = await fulfillToolCall(api, block.name, block.input);
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: typeof result === 'string' ? result : JSON.stringify(result),
+          });
+        }
+      }
+
+      if (toolResults.length > 0) {
+        messages.push({ role: 'user', content: toolResults });
+      }
+      continue;
+    }
+
+    // Safety: break if no tool activity
+    const hasActivity = response.content.some(
+      (b: any) => b.type === 'tool_use' || b.type === 'server_tool_use'
+    );
+    if (!hasActivity) break;
   }
 
-  // --- Turn 2: Retry on failure ---
-  console.log(`[AGENT] Execution failed: ${execResult.error?.slice(0, 200)}`);
-
-  // Check timeout before retrying
-  if (Date.now() - startTime > AGENT_TIMEOUT_MS * 0.6) {
-    console.warn(`[AGENT] Not enough time for retry, returning partial result`);
-    messages.push({ role: 'assistant', content: response.content });
-    return buildResult(api, code, execResult.logs, false, messages, systemPrompt);
-  }
-
-  messages.push({ role: 'assistant', content: response.content });
-  messages.push({
-    role: 'user',
-    content: `Code execution failed with error:\n${execResult.error}\n\nAPI calls made before failure:\n${api.getCallLog()}\n\nConsole output:\n${execResult.logs.join('\n')}\n\nFix the code. Output ONLY the corrected code block.`,
-  });
-
-  console.log(`[AGENT] Retrying with error context...`);
-  const retryResponse = await createMessage({
-    model: 'claude-opus-4-6',
-    max_tokens: 32768,
-    system: systemPrompt,
-    messages,
-  });
-
-  const retryText = retryResponse.content.find((b) => b.type === 'text')?.text ?? '';
-  const retryCode = extractCode(retryText);
-  const elapsed3 = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[AGENT] Retry code generated in ${elapsed3}s (${retryCode.length} chars)`);
-
-  // Fresh API instance for retry
-  const retryApi = new TripletexApi(credentials);
-  console.log(`[AGENT] Executing retry code...`);
-  const retryResult = await executeCode(retryCode, retryApi);
-
-  const elapsed4 = ((Date.now() - startTime) / 1000).toFixed(1);
-  console.log(`[AGENT] Retry done in ${elapsed4}s — success=${retryResult.success} calls=${retryApi.callLog.length}`);
-
-  if (retryResult.logs.length > 0) {
-    console.log(`[AGENT RETRY LOGS] ${retryResult.logs.join('\n')}`);
-  }
-
-  messages.push({ role: 'assistant', content: retryResponse.content });
-  return buildResult(retryApi, retryCode, retryResult.logs, true, messages, systemPrompt);
-}
-
-// ---------------------------------------------------------------------------
-// Build result from API call log
-// ---------------------------------------------------------------------------
-
-function buildResult(
-  api: TripletexApi,
-  code: string,
-  logs: string[],
-  retried: boolean,
-  messages: any[],
-  systemPrompt: any[],
-): AgentResult {
   const errors = api.callLog
     .filter((c) => c.status >= 400)
     .map((c) => ({ tool: `${c.method} ${c.path}`, status: c.status }));
 
-  return {
-    toolCallCount: api.callLog.length,
-    errors,
-    messages,
-    systemPrompt,
-    generatedCode: code,
-    executionLogs: logs,
-    retried,
-  };
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[AGENT] Done: ${api.callLog.length} API calls, ${errors.length} errors, ${elapsed}s`);
+
+  return { toolCallCount: api.callLog.length, errors, messages, systemPrompt };
 }
 
 // ---------------------------------------------------------------------------
-// Sandbox verification — asks Claude to summarise what happened
+// Fulfill a tool call by calling Tripletex API
+// ---------------------------------------------------------------------------
+
+async function fulfillToolCall(
+  api: TripletexApi,
+  toolName: string,
+  input: any,
+): Promise<any> {
+  try {
+    switch (toolName) {
+      case 'tripletex_get':
+        return await api.get(input.path, input.params);
+      case 'tripletex_post':
+        return await api.post(input.path, input.body);
+      case 'tripletex_put':
+        return await api.put(input.path, input.body, input.params);
+      case 'tripletex_del':
+        return await api.del(input.path);
+      case 'tripletex_post_list':
+        return await api.postList(input.path, input.items);
+      default:
+        return { error: `Unknown tool: ${toolName}` };
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox verification
 // ---------------------------------------------------------------------------
 
 export async function verifySandboxResult(
   prompt: string,
-  result: AgentResult
+  result: AgentResult,
 ): Promise<{ verified: boolean; summary: string }> {
   try {
     const response = await claude.messages.create({
@@ -194,7 +276,7 @@ export async function verifySandboxResult(
       messages: [
         {
           role: 'user',
-          content: `Task: "${prompt}"\n\nGenerated code:\n\`\`\`typescript\n${result.generatedCode}\n\`\`\`\n\nExecution logs:\n${result.executionLogs?.join('\n') ?? 'none'}\n\nAPI calls: ${result.toolCallCount}, Errors: ${result.errors.length}\nRetried: ${result.retried}\n\nWas the task completed successfully? Reply with:\nVERIFIED: yes/no\nSUMMARY: one sentence.`,
+          content: `Task: "${prompt}"\n\nAPI calls made: ${result.toolCallCount}, Errors: ${result.errors.length}\n\nWas the task completed successfully? Reply with:\nVERIFIED: yes/no\nSUMMARY: one sentence.`,
         },
       ],
     });
@@ -204,10 +286,8 @@ export async function verifySandboxResult(
     const summaryMatch = text.match(/SUMMARY:\s*(.+)/i);
     const summary = summaryMatch?.[1]?.trim() ?? text.trim();
 
-    console.log(`[VERIFY] verified=${verified} summary=${summary}`);
     return { verified, summary };
   } catch (err) {
-    console.error(`[VERIFY ERROR]`, err);
     return { verified: false, summary: `Verification failed: ${err}` };
   }
 }
