@@ -130,11 +130,15 @@ All tools are pre-authenticated. Use them inside code_execution Python code.
 **Foreign currency invoices:**
   When the task specifies a specific exchange rate (e.g. "rate was 10.11 NOK/EUR"):
   Create the order in NOK (not EUR) with the pre-converted amount: amount_NOK = amount_EUR × rate.
-  This ensures the invoice reflects the correct rate. Do NOT create EUR orders and rely on Tripletex's default rate.
-  For the payment at a different rate: register with paidAmount = amount_EUR × new_rate.
-  Book the disagio (exchange loss) or agio (exchange gain) manually:
-  - Disagio (loss): debit 8160 (Valutatap), credit 1500 (Kundefordringer)
-  - Agio (gain): debit 1500, credit 8060 (Valutagevinst)
+  This ensures the invoice reflects the correct rate. Do NOT create EUR orders.
+  For payment at a different rate:
+  1. Register payment: paidAmount = amount_EUR × new_rate
+  2. After payment, GET the invoice to check amountOutstanding
+  3. If amountOutstanding > 0 (disagio) or < 0 (agio), book the difference:
+     - Disagio (loss, rate decreased): debit 8160 (Valutatap), credit 1500 (Kundefordringer) for the outstanding amount
+     - Agio (gain, rate increased): debit 1500, credit 8060 (Valutagevinst)
+     Include customer:{id} on the 1500 posting!
+  4. The invoice should have amountOutstanding = 0 after all postings.
 
 **Foreign currency payment params:**
   For invoices in foreign currency, PUT /invoice/{id}/:payment requires BOTH:
@@ -293,6 +297,13 @@ invoice = (await tripletex_put(f"/order/{order['id']}/:invoice", {}, {"invoiceDa
 await tripletex_put(f"/invoice/{invoice['id']}/:send", {}, {"sendType": "EMAIL"})
 print(f"Created invoice {invoice['id']}")
 \`\`\`
+
+## Fixed-price project invoicing (a-konto)
+When invoicing a percentage of a fixed-price project budget:
+- The budget amount IS the amount excluding VAT
+- Do NOT add VAT type on the order line unless the task explicitly mentions VAT/MVA
+- Example: "invoice 50% of budget 400000" → unitPriceExcludingVatCurrency = 200000, NO vatType
+- Only add vatType if the task specifically says "with VAT" or "med MVA"
 
 ## Batch endpoints
 await tripletex_post_list("/employee/list", [...]), await tripletex_post_list("/customer/list", [...]),
