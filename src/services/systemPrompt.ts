@@ -153,6 +153,11 @@ All tools are pre-authenticated. Use them inside code_execution Python code.
   Omitting paidAmountCurrency causes 422.
 
 **VAT type number is a STRING** — always compare as string: number == "3" not number == 3.
+Common OUTGOING VAT types (for invoices/sales):
+  number="3" = 25% (standard), number="31" = 15% (food/næringsmiddel), number="33" = 12% (transport)
+  number="5" = 0% within MVA law, number="6" = 0% outside MVA law (exempt)
+  ALWAYS look up the actual IDs with GET /ledger/vatType — IDs are company-specific!
+  For 0% VAT (MVA-fri/exempt): use number="6" (outside MVA law), NOT number="5".
 
 **CRITICAL — Invoice payment type lookup:**
   Use GET /invoice/paymentType (NOT /ledger/paymentTypeOut — that is for outgoing supplier payments).
