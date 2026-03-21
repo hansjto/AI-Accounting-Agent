@@ -234,6 +234,61 @@ console.log(\`Created invoice \${invoice.id}\`);
 api.postList('/employee/list', [...]), api.postList('/customer/list', [...]),
 api.postList('/order/orderline/list', [...]), api.postList('/travelExpense/cost/list', [...])
 
+## API endpoint reference — use ONLY these paths (do NOT guess paths)
+Customer: GET/POST /customer, GET/PUT/DELETE /customer/{id}
+Supplier: GET/POST /supplier, GET/PUT/DELETE /supplier/{id}
+Contact: GET/POST /contact, GET/PUT /contact/{id}
+Employee: GET/POST /employee, GET/PUT /employee/{id}
+Employee employment: POST /employee/employment, GET/PUT /employee/employment/{id}
+Employee employment details: POST /employee/employment/details, GET/PUT /employee/employment/details/{id}
+Employee entitlements: PUT /employee/entitlement/:grantEntitlementsByTemplate?employeeId={id}&template=ALL_PRIVILEGES
+Department: GET/POST /department, GET/PUT/DELETE /department/{id}
+Product: GET/POST /product, GET/PUT/DELETE /product/{id}
+Product unit: GET /product/unit
+Order: GET/POST /order, GET/PUT/DELETE /order/{id}
+Order line: POST /order/orderline, POST /order/orderline/list (batch), GET/PUT/DELETE /order/orderline/{id}
+Order→Invoice: PUT /order/{id}/:invoice?invoiceDate=YYYY-MM-DD
+Invoice: GET /invoice?invoiceDateFrom&invoiceDateTo (BOTH REQUIRED), GET /invoice/{id}
+Invoice send: PUT /invoice/{id}/:send?sendType=EMAIL
+Invoice payment: PUT /invoice/{id}/:payment?paymentTypeId&paidAmount&paymentDate (ALL query params, body={})
+Invoice credit note: PUT /invoice/{id}/:createCreditNote?date=YYYY-MM-DD
+Invoice payment types: GET /invoice/paymentType
+Supplier invoice: GET /supplierInvoice?invoiceDateFrom&invoiceDateTo (BOTH REQUIRED), GET /supplierInvoice/{id}
+Supplier invoice approve: PUT /supplierInvoice/{id}/:approve
+Supplier invoice payment: POST /supplierInvoice/{id}/:addPayment {paymentType,amount,paymentDate}
+Project: GET/POST /project, GET/PUT /project/{id}
+Project activity: POST /project/{projectId}/projectActivity {name,activityType}
+Activity: GET /activity, GET /activity/>forTimeSheet?projectId={id}
+Timesheet: POST /timesheet/entry, GET /timesheet/entry, PUT/DELETE /timesheet/entry/{id}
+Timesheet month: PUT /timesheet/month/:approve?employeeIds={id}&monthYear=YYYY-MM-01
+Voucher: GET /ledger/voucher?dateFrom&dateTo (BOTH REQUIRED), POST /ledger/voucher, GET/PUT/DELETE /ledger/voucher/{id}
+Voucher reverse: PUT /ledger/voucher/{id}/:reverse?date=YYYY-MM-DD
+Account: GET /ledger/account?number={N}, POST /ledger/account, GET/PUT /ledger/account/{id}
+VAT type: GET /ledger/vatType
+Posting: GET /ledger/posting?dateFrom&dateTo (BOTH REQUIRED)
+Payment type out: GET /ledger/paymentTypeOut
+Balance sheet: GET /balanceSheet?dateFrom&dateTo (BOTH REQUIRED) → fields: account(id,number,name),balanceIn,balanceChange,balanceOut
+Accounting dim name: GET/POST /ledger/accountingDimensionName
+Accounting dim value: POST /ledger/accountingDimensionValue
+Travel expense: GET/POST /travelExpense, GET/PUT/DELETE /travelExpense/{id}
+Travel expense deliver: PUT /travelExpense/:deliver?id={travelExpenseId}
+Travel expense cost: POST /travelExpense/cost, POST /travelExpense/cost/list (batch)
+Travel expense per diem: POST /travelExpense/perDiemCompensation
+Travel expense mileage: POST /travelExpense/mileageAllowance
+Travel expense payment types: GET /travelExpense/paymentType
+Travel expense cost categories: GET /travelExpense/costCategory
+Travel expense rate category groups: GET /travelExpense/rateCategoryGroup
+Travel expense rate categories: GET /travelExpense/rateCategory
+Travel expense rates: GET /travelExpense/rate
+Salary types: GET /salary/type
+Salary transaction: POST /salary/transaction
+Bank statement: GET /bank/statement?accountId={id}
+Bank statement transactions: GET /bank/statement/transaction?bankStatementId={id}
+Bank reconciliation: GET/POST /bank/reconciliation, GET/PUT /bank/reconciliation/{id}
+Bank reconciliation last: GET /bank/reconciliation/>last?accountId={id}
+Currency: GET /currency, GET /currency/{id}/rate?date=YYYY-MM-DD
+Company: GET /company/{id}, PUT /company/{id}
+
 ## SPEED RULES
 1. Output ONLY a code block. No explanation.
 2. Use Promise.all() for independent lookups.

@@ -68,7 +68,7 @@ export async function runAgent(
   console.log(`[AGENT] Calling Claude to generate code...`);
   const response = await claude.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 16384,
+    max_tokens: 32768,
     system: systemPrompt,
     messages,
   });
@@ -114,7 +114,7 @@ export async function runAgent(
   console.log(`[AGENT] Retrying with error context...`);
   const retryResponse = await claude.messages.create({
     model: 'claude-opus-4-6',
-    max_tokens: 16384,
+    max_tokens: 32768,
     system: systemPrompt,
     messages,
   });
