@@ -207,34 +207,57 @@ export async function createSupplierInvoiceVoucher(api: TripletexApi, input: {
   const incomingVatTypes = lookups[3].values || [];
   const vatType = incomingVatTypes.find((v: any) => Math.abs(v.percentage - vatRate) < 0.1);
 
-  // Create voucher
-  const voucher = (await api.post('/ledger/voucher', {
-    date: input.date,
-    description: `${input.supplierName} - ${input.invoiceNumber}`,
-    vendorInvoiceNumber: input.invoiceNumber,
-    postings: [
-      {
-        row: 1,
-        account: { id: expenseAccount.id },
-        amount: netAmount,
-        date: input.date,
-        description: expenseAccount.name,
-        ...(vatType ? { vatType: { id: vatType.id } } : {}),
-      },
-      {
-        row: 2,
-        account: { id: apAccount.id },
-        amount: -input.grossAmount,
-        date: input.date,
+  // Try incomingInvoice first (creates proper supplierInvoice), fall back to voucher
+  let result: any;
+  try {
+    const incomingResult = await api.post('/incomingInvoice', {
+      invoiceHeader: {
+        vendorId: supplier.id,
+        invoiceDate: input.date,
+        invoiceNumber: input.invoiceNumber,
+        invoiceAmount: input.grossAmount,
         description: `${input.supplierName} - ${input.invoiceNumber}`,
-        supplier: { id: supplier.id },
       },
-    ],
-  })).value;
+      orderLines: [
+        {
+          externalId: '1',
+          description: expenseAccount.name || 'Expense',
+          accountId: expenseAccount.id,
+          ...(vatType ? { vatTypeId: vatType.id } : {}),
+        },
+      ],
+    }, { sendTo: 'ledger' });
+    result = { voucherId: incomingResult.value?.voucherId, method: 'incomingInvoice' };
+  } catch (err) {
+    // Fall back to voucher approach
+    const voucher = (await api.post('/ledger/voucher', {
+      date: input.date,
+      description: `${input.supplierName} - ${input.invoiceNumber}`,
+      vendorInvoiceNumber: input.invoiceNumber,
+      postings: [
+        {
+          row: 1,
+          account: { id: expenseAccount.id },
+          amount: netAmount,
+          date: input.date,
+          description: expenseAccount.name,
+          ...(vatType ? { vatType: { id: vatType.id } } : {}),
+        },
+        {
+          row: 2,
+          account: { id: apAccount.id },
+          amount: -input.grossAmount,
+          date: input.date,
+          description: `${input.supplierName} - ${input.invoiceNumber}`,
+          supplier: { id: supplier.id },
+        },
+      ],
+    })).value;
+    result = { voucherId: voucher.id, voucherNumber: voucher.number, method: 'voucher' };
+  }
 
   return {
-    voucherId: voucher.id,
-    voucherNumber: voucher.number,
+    ...result,
     supplierId: supplier.id,
     supplierName: supplier.name || input.supplierName,
     netAmount,

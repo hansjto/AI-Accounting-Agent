@@ -332,7 +332,7 @@ async function fulfillToolCall(
       case 'tripletex_get':
         return await api.get(input.path, input.params);
       case 'tripletex_post':
-        return await api.post(input.path, input.body);
+        return await api.post(input.path, input.body, input.params);
       case 'tripletex_put':
         return await api.put(input.path, input.body, input.params);
       case 'tripletex_del':

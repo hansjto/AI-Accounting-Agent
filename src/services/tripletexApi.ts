@@ -29,8 +29,8 @@ export class TripletexApi {
     return this._call('GET', path, params);
   }
 
-  async post(path: string, body?: unknown): Promise<any> {
-    return this._call('POST', path, undefined, body);
+  async post(path: string, body?: unknown, params?: Record<string, unknown>): Promise<any> {
+    return this._call('POST', path, params, body);
   }
 
   async put(path: string, body?: unknown, params?: Record<string, unknown>): Promise<any> {
