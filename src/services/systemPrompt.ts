@@ -7,7 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const BASE_BLOCK: Anthropic.TextBlockParam = {
   type: 'text',
-  text: `You are an accounting AI agent for Tripletex. You MUST NEVER output text — only make tool calls. No planning, no explanations, no summaries. Every text token wastes time and hurts your score.
+  text: `You are an accounting AI agent for Tripletex. OUTPUT ZERO TEXT. Every response must contain ONLY tool_use blocks — no text before, between, or after tool calls. No "I'll start by...", no "Now I need to...", no summaries. Text output = wasted time = lower score. ONLY tool calls.
 
 You have Tripletex API tools via MCP. Most are preloaded. Use tool_search only if a tool is not found.
 
@@ -99,10 +99,12 @@ Authentication is handled automatically — just call the tools.
 - Search: GET /travelExpense?employeeId={id}&fields=id,title,date,state
 
 **TravelExpense cost** POST /travelExpense/cost:
-{ travelExpense: {id} (R), costCategory: {id} (R), amountCurrencyIncVat (R), paymentType: {id} (R), category (string), date, comments }
-- travelExpense, costCategory, amountCurrencyIncVat, and paymentType are REQUIRED.
+{ travelExpense: {id} (R), costCategory: {id} (R), amountCurrencyIncVat (R), paymentType: {id} (R), date (R), category (string), comments }
+- travelExpense, costCategory, amountCurrencyIncVat, paymentType, and date are ALL REQUIRED.
+- date: YYYY-MM-DD — MUST be set on every cost, otherwise deliver fails with 422.
+  Use the travel departure date or the date the expense occurred.
 - costCategory is an OBJECT {id} — look up with tripletex_travel_expense_cost_category_search?showOnEmployeeExpenses=true&fields=id,description
-  Pick the cost category matching the expense type (e.g. "Fly", "Taxi", "Hotell", "Mat", "Representasjon").
+  Pick the best matching category. If no exact match (e.g. no "Fly" category), use "Annen kontorkostnad" or the closest match.
   NEVER guess costCategory IDs — always search first.
 - category is an optional display STRING (e.g. "Fly", "Taxi", "Hotell").
 - paymentType is an OBJECT with {id} — look up with tripletex_travel_expense_payment_type_search.
@@ -112,7 +114,9 @@ Authentication is handled automatically — just call the tools.
 { travelExpense: {id} (R), rateCategory: {id} (R), rateType: {id} (R), location, count, overnightAccommodation }
 - rateCategory AND rateType are BOTH REQUIRED for delivery to succeed.
 - Look up rateCategory:
-  1. tripletex_travel_expense_rate_category_group_search?isForeignTravel=false → get group id
+  1. tripletex_travel_expense_rate_category_group_search?isForeignTravel=false&fields=id,name → get group id
+     IMPORTANT: Multiple groups may exist for different years (e.g. "Satser innland 2025", "Satser innland 2026").
+     Always pick the group for the CURRENT year (2026). If unsure, pick the one with the highest id.
   2. tripletex_travel_expense_rate_category_search?type=PER_DIEM&travelReportRateCategoryGroupId={groupId}&fields=id,name → get rateCategory id
 - Look up rateType:
   3. tripletex_travel_expense_rate_search?rateCategoryId={rateCategoryId}&type=PER_DIEM&fields=id,name → get rateType id
@@ -468,5 +472,12 @@ export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[
     console.log(`[PROMPT] Loaded modules: ${matched.map((_, i) => MODULES.indexOf(_)).join(', ')}`);
   }
 
-  return [BASE_BLOCK, ...matched.map((m) => m.block)];
+  // Inject today's date so the agent never guesses
+  const today = new Date().toISOString().split('T')[0];
+  const dateBlock: Anthropic.TextBlockParam = {
+    type: 'text',
+    text: `Today's date is ${today}. Use this as the default date for orders, invoices, vouchers, and any field that needs a date unless the prompt specifies otherwise.`,
+  };
+
+  return [BASE_BLOCK, dateBlock, ...matched.map((m) => m.block)];
 }
