@@ -88,6 +88,14 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
   <div class="sidebar-header"><div class="dot"></div> Agent Replay</div>
   <div class="sidebar-search"><input type="text" id="search" placeholder="Filter runs..." oninput="filterRuns()"></div>
   <div class="run-list" id="runList"></div>
+  <div style="padding:10px 12px;border-top:1px solid #30363d">
+    <button onclick="document.getElementById('scoreInput').style.display=document.getElementById('scoreInput').style.display==='none'?'block':'none'" style="width:100%;background:#21262d;border:1px solid #30363d;color:#e6edf3;padding:6px;border-radius:6px;cursor:pointer;font-size:11px">Upload Scores</button>
+    <div id="scoreInput" style="display:none;margin-top:8px">
+      <textarea id="scoreJson" placeholder="Paste score JSON array here..." style="width:100%;height:80px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-family:monospace;font-size:10px;padding:6px;resize:vertical"></textarea>
+      <button onclick="uploadScores()" style="width:100%;margin-top:4px;background:#1a3a5c;border:1px solid #264b73;color:#58a6ff;padding:5px;border-radius:6px;cursor:pointer;font-size:11px">Upload & Match</button>
+      <div id="scoreResult" style="font-size:10px;color:#8b949e;margin-top:4px"></div>
+    </div>
+  </div>
 </div>
 
 <div class="main">
@@ -103,6 +111,7 @@ body{background:#0d1117;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
     <button class="primary" onclick="stepNext()" title="Next (→)">▶ Next</button>
     <button onclick="stepLast()" title="Last">⏭</button>
     <button onclick="toggleAutoPlay()" id="btnAuto">⏩ Auto</button>
+    <button onclick="toggleCollapse()" id="btnCollapse" title="Show only first and last message">⊟ Collapse</button>
     <input type="range" class="step-slider" id="slider" min="0" max="0" value="0" oninput="stepTo(+this.value)">
     <span class="step-info" id="stepInfo">0 / 0</span>
   </div>
@@ -158,6 +167,7 @@ function renderRunList() {
         <span class="ri-badge calls">${r.toolCallCount} calls</span>
         <span class="ri-badge errors ${errCls}">${r.errorCount} err</span>
         <span class="ri-badge time">${(r.elapsedMs/1000).toFixed(1)}s</span>
+        ${r.score ? `<span class="ri-badge score">${r.score.score_raw}/${r.score.score_max}</span>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -254,8 +264,29 @@ function renderChat() {
 
   chat.innerHTML = events.map((e, i) => {
     const vis = i <= currentStep ? 'visible' : 'hidden';
+    // In collapsed mode, only show first event (task), last stdout/result, and errors
+    if (collapsed && i > 0 && i < events.length - 1) {
+      if (e.t !== 'err' && e.t !== 'stdout' && e.t !== 'verify') return '';
+      // Only show the last stdout
+      if (e.t === 'stdout') {
+        const laterStdout = events.slice(i+1).findIndex(x => x.t === 'stdout');
+        if (laterStdout >= 0) return '';
+      }
+    }
     return renderEvent(e, vis);
   }).join('');
+
+  if (collapsed && currentStep >= events.length - 1) {
+    const midCount = events.length - 2;
+    chat.insertAdjacentHTML('afterbegin',
+      events[0] ? renderEvent(events[0], 'visible') : '');
+    // Already rendered, just add a divider
+    const firstMsg = chat.querySelector('.msg');
+    if (firstMsg && firstMsg.nextSibling) {
+      firstMsg.insertAdjacentHTML('afterend',
+        `<div class="info" style="padding:8px">⋯ ${midCount} steps collapsed ⋯</div>`);
+    }
+  }
 
   // Scroll to current step
   if (currentStep >= 0) {
@@ -355,6 +386,37 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'End') { e.preventDefault(); stepLast(); }
   else if (e.key === 'a') { toggleAutoPlay(); }
 });
+
+let collapsed = false;
+function toggleCollapse() {
+  collapsed = !collapsed;
+  document.getElementById('btnCollapse').textContent = collapsed ? '⊞ Expand' : '⊟ Collapse';
+  renderChat();
+}
+
+async function uploadScores() {
+  const el = document.getElementById('scoreJson');
+  const resultEl = document.getElementById('scoreResult');
+  try {
+    let data = JSON.parse(el.value);
+    if (!Array.isArray(data)) data = [data];
+    resultEl.textContent = 'Uploading ' + data.length + ' scores...';
+    const results = [];
+    for (const score of data) {
+      const res = await fetch('/api/score', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(score)
+      });
+      results.push(await res.json());
+    }
+    const matched = results.filter(r => r.ok).length;
+    resultEl.innerHTML = `<span style="color:#3fb950">${matched}/${data.length} matched</span>`;
+    loadRuns(); // Refresh list
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:#f85149">Error: ${e.message}</span>`;
+  }
+}
 
 // Init
 loadRuns();

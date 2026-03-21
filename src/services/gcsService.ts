@@ -13,6 +13,7 @@ export interface RunSummary {
   errorCount: number;
   verified: boolean | null;
   summary: string | null;
+  score: { score_raw: number; score_max: number; normalized_score: number; feedback?: any } | null;
 }
 
 // Simple in-memory cache (10s TTL)
@@ -42,6 +43,7 @@ export async function listRuns(limit = 50): Promise<RunSummary[]> {
         errorCount: (data.errors || []).length,
         verified: data.verification?.verified ?? null,
         summary: data.verification?.summary ?? null,
+        score: data.score ? { score_raw: data.score.score_raw, score_max: data.score.score_max, normalized_score: data.score.normalized_score, feedback: data.score.feedback } : null,
       });
     } catch {
       // skip corrupt files

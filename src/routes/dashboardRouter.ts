@@ -29,6 +29,81 @@ dashboardRouter.get('/api/runs/:filename', async (req: Request, res: Response) =
   }
 });
 
+// Score upload — match score to closest run by timestamp
+dashboardRouter.post('/api/score', async (req: Request, res: Response) => {
+  try {
+    const score = req.body;
+    if (!score || !score.completed_at) {
+      return res.status(400).json({ error: 'Missing completed_at in score JSON' });
+    }
+
+    // Find closest result file by matching completed_at timestamp
+    const runs = await listRuns(100);
+    const scoreTime = new Date(score.completed_at).getTime();
+    const scoreDuration = score.duration_ms || 0;
+    const scoreStartTime = scoreTime - scoreDuration;
+
+    // Match: find run whose timestamp is closest to score's start or end time
+    let bestMatch: string | null = null;
+    let bestDiff = Infinity;
+
+    for (const run of runs) {
+      // Parse run timestamp from filename: result-2026-03-21T15-37-22-907Z.json
+      const m = run.filename.match(/result-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+      if (!m) continue;
+      const runTime = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`).getTime();
+      const diff = Math.abs(runTime - scoreTime);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestMatch = run.filename;
+      }
+    }
+
+    if (!bestMatch || bestDiff > 120000) { // within 2 minutes
+      return res.status(404).json({ error: 'No matching run found', bestMatch, bestDiff });
+    }
+
+    // Download existing result, add score, re-upload
+    const detail = await getRunDetail(bestMatch);
+    if (!detail) return res.status(404).json({ error: 'Run detail not found' });
+
+    const updated = { ...(detail as any), score };
+    const { Storage } = await import('@google-cloud/storage');
+    const storage = new Storage();
+    await storage.bucket('tripletex-solve-requests').file(bestMatch).save(
+      JSON.stringify(updated, null, 2),
+      { contentType: 'application/json' }
+    );
+
+    res.json({ ok: true, matched: bestMatch, diff: bestDiff });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Bulk score upload — array of scores
+dashboardRouter.post('/api/scores', async (req: Request, res: Response) => {
+  try {
+    const scores = Array.isArray(req.body) ? req.body : [req.body];
+    const results = [];
+    for (const score of scores) {
+      try {
+        const resp = await fetch(`http://localhost:${process.env.PORT || 5000}/api/score`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(score),
+        });
+        results.push(await resp.json());
+      } catch (e) {
+        results.push({ error: String(e) });
+      }
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Dashboard HTML
 dashboardRouter.get('/dashboard', (_req: Request, res: Response) => {
   res.type('html').send(DASHBOARD_HTML);
