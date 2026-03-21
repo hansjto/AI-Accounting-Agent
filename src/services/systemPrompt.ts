@@ -182,7 +182,8 @@ Common OUTGOING VAT types (for invoices/sales):
   The full list includes: Fly, Taxi, Hotell, Tog, Mat, Buss, Parkering, etc.
   Pick the EXACT match: "Fly" for flights, "Taxi" for taxi, "Hotell" for hotel, "Tog" for train.
   Only use "Annen kontorkostnad" if no specific category exists.
-- Create costs ONE AT A TIME sequentially. Parallel causes 409.
+- Create each cost EXACTLY ONCE, sequentially. Do NOT retry or create duplicates — a duplicate doubles the amount!
+  Parallel creation causes 409.
 
 **Per diem** POST /travelExpense/perDiemCompensation:
 { travelExpense: {id} (R), rateCategory: {id} (R), rateType: {id} (R), location, count, overnightAccommodation }
