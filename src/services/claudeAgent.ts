@@ -4,7 +4,7 @@ import type { TripletexCredentials } from '../types.js';
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const MCP_SERVER_URL = 'https://trippeltex-mcp-production-0d9b.up.railway.app/mcp';
+const MCP_SERVER_URL = 'https://tripletex-mcp-381079540280.europe-west4.run.app/mcp';
 
 const AGENT_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min — leave margin before 5 min competition timeout
 
