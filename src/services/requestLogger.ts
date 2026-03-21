@@ -38,16 +38,23 @@ export async function logResult(
 
   const payload = {
     prompt,
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-6',
     elapsedMs,
     toolCallCount: agentResult.toolCallCount,
     errors: agentResult.errors,
-    systemPrompt: agentResult.systemPrompt.map((b: any) => b.text),
+    systemPrompt: (agentResult.systemPrompt || []).map((b: any) => b?.text || ''),
     messages: agentResult.messages,
     verification,
   };
 
-  const content = JSON.stringify(payload, null, 2);
+  let content: string;
+  try {
+    content = JSON.stringify(payload, null, 2);
+  } catch (err) {
+    // If messages are too large or have circular refs, save without messages
+    console.error('[RESULT SERIALIZE FAILED]', err);
+    content = JSON.stringify({ ...payload, messages: '[too large to serialize]' }, null, 2);
+  }
 
   // Always log summary to stdout
   console.log(`[RESULT] ${resultFilename} tools=${agentResult.toolCallCount} errors=${agentResult.errors.length} verified=${verification?.verified ?? 'n/a'}`);
