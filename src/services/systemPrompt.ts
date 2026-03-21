@@ -200,7 +200,9 @@ Common OUTGOING VAT types (for invoices/sales):
 
 **Project** POST /project:
 { name, number, projectManager: {id} (R), startDate (R), customer: {id}, endDate,
-  description, isInternal, department: {id} }
+  description, isInternal, isFixedPrice, fixedprice, department: {id} }
+- For fixed-price projects: set isFixedPrice: true AND fixedprice: amount in the SAME create call.
+  Do NOT use "budget" — that field doesn't exist. The field is "fixedprice" (lowercase p).
 - ALWAYS grant entitlements BEFORE creating a project:
   \`api.put('/employee/entitlement/:grantEntitlementsByTemplate', {}, { employeeId, template: 'ALL_PRIVILEGES' })\`
 
