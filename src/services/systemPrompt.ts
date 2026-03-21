@@ -395,8 +395,10 @@ const MODULES: Module[] = [
 **Endpoints:**
 - GET /balanceSheet → get trial balance (saldobalanse)
   params: dateFrom (required), dateTo (required), departmentId, projectId,
-          accountIds (comma-separated), includeSubText, fields
-  Response: { values: [{ account: {id, number, name}, openingBalance, closingBalance, ... }] }
+          accountNumberFrom, accountNumberTo, fields
+  Response fields: account(id,number,name), balanceIn, balanceChange, balanceOut
+  Use: fields=account(id,number,name),balanceIn,balanceChange,balanceOut
+  NOTE: "closingBalance", "endBalance", "amount" do NOT exist — use balanceOut for ending balance.
 
 - GET /ledger/account → chart of accounts
   params: isApplicableForDelivery, isApplicableForSupplierInvoice, fields
@@ -406,8 +408,9 @@ const MODULES: Module[] = [
   params: dateFrom, dateTo, accountId, customerId, employeeId, projectId, fields
 
 **Reporting flow:**
-1. GET /balanceSheet?dateFrom=YYYY-01-01&dateTo=YYYY-12-31&fields=account(id,number,name),openingBalance,closingBalance
-2. Filter or group results as needed`,
+1. GET /balanceSheet?dateFrom=YYYY-01-01&dateTo=YYYY-12-31&fields=account(id,number,name),balanceIn,balanceChange,balanceOut
+   balanceIn = opening balance, balanceOut = closing balance, balanceChange = period movement
+2. Filter by accountNumberFrom/accountNumberTo for specific account ranges`,
       cache_control: { type: 'ephemeral' },
     },
   },
