@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { buildSystemPrompt } from './systemPrompt.js';
 import { TripletexApi } from './tripletexApi.js';
+import { createInvoiceFlow, registerPayment, createSupplierInvoiceVoucher, setupProject } from './compoundTools.js';
 import type { TripletexCredentials } from '../types.js';
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -79,6 +80,90 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ];
 
+// Compound tools — multi-step accounting flows in a single call
+const COMPOUND_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'create_invoice',
+    description: 'Complete invoice flow: finds customer, products, VAT, sets bank account, creates order+lines, converts to invoice, optionally sends. Handles everything.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        customerOrgNumber: { type: 'string', description: 'Customer organization number' },
+        lines: {
+          type: 'array',
+          description: 'Invoice lines',
+          items: {
+            type: 'object',
+            properties: {
+              productNumber: { type: 'string', description: 'Product number (optional if description+unitPrice given)' },
+              description: { type: 'string', description: 'Line description' },
+              quantity: { type: 'number', description: 'Quantity' },
+              unitPrice: { type: 'number', description: 'Unit price excl VAT in NOK' },
+              vatRate: { type: 'number', description: '0, 15, or 25 (default 25)' },
+            },
+          },
+        },
+        invoiceDate: { type: 'string', description: 'Invoice date YYYY-MM-DD' },
+        send: { type: 'boolean', description: 'Send invoice by email (default false)' },
+      },
+      required: ['customerOrgNumber', 'lines', 'invoiceDate'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'register_payment',
+    description: 'Register payment on unpaid invoice: finds customer, finds unpaid invoice, looks up bank payment type, registers payment. Handles foreign currency with paidAmountCurrency.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        customerOrgNumber: { type: 'string', description: 'Customer organization number' },
+        amount: { type: 'number', description: 'Payment amount in NOK (default: full invoice amount)' },
+        paymentDate: { type: 'string', description: 'Payment date YYYY-MM-DD' },
+        paidAmountCurrency: { type: 'number', description: 'Amount in foreign currency (for EUR invoices etc)' },
+      },
+      required: ['customerOrgNumber', 'paymentDate'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'create_supplier_invoice',
+    description: 'Register supplier invoice as voucher: finds/creates supplier, looks up expense account+AP+VAT, creates voucher with correct postings. Handles all the posting structure.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        supplierName: { type: 'string', description: 'Supplier name' },
+        supplierOrgNumber: { type: 'string', description: 'Supplier organization number' },
+        invoiceNumber: { type: 'string', description: 'Invoice reference number' },
+        grossAmount: { type: 'number', description: 'Total amount INCLUDING VAT' },
+        expenseAccountNumber: { type: 'number', description: 'Expense account number (e.g. 6500, 6300)' },
+        vatRate: { type: 'number', description: 'VAT rate percentage (default 25)' },
+        date: { type: 'string', description: 'Invoice date YYYY-MM-DD' },
+      },
+      required: ['supplierName', 'invoiceNumber', 'grossAmount', 'expenseAccountNumber', 'date'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+  {
+    name: 'setup_project',
+    description: 'Create project with entitlements: finds employee+customer, grants entitlements, creates project, optionally creates linked activity. Handles the entitlement-before-project requirement.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        projectName: { type: 'string', description: 'Project name' },
+        customerOrgNumber: { type: 'string', description: 'Customer org number (optional for internal projects)' },
+        projectManagerEmail: { type: 'string', description: 'Project manager email' },
+        startDate: { type: 'string', description: 'Start date YYYY-MM-DD' },
+        budget: { type: 'number', description: 'Fixed price budget (optional)' },
+        isInternal: { type: 'boolean', description: 'Is internal project' },
+        createActivity: { type: 'boolean', description: 'Create linked activity (default true)' },
+        activityName: { type: 'string', description: 'Activity name (default: project name)' },
+      },
+      required: ['projectName', 'projectManagerEmail', 'startDate'],
+    },
+    allowed_callers: ['code_execution_20260120'],
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -152,6 +237,7 @@ export async function runAgent(
       tools: [
         { type: 'code_execution_20260120', name: 'code_execution' },
         ...TOOLS,
+        ...COMPOUND_TOOLS,
       ],
     };
 
@@ -253,6 +339,15 @@ async function fulfillToolCall(
         return await api.del(input.path);
       case 'tripletex_post_list':
         return await api.postList(input.path, input.items);
+      // Compound tools
+      case 'create_invoice':
+        return await createInvoiceFlow(api, input);
+      case 'register_payment':
+        return await registerPayment(api, input);
+      case 'create_supplier_invoice':
+        return await createSupplierInvoiceVoucher(api, input);
+      case 'setup_project':
+        return await setupProject(api, input);
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
