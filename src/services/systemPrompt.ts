@@ -602,7 +602,7 @@ export function buildSystemPrompt(userPrompt: string): Anthropic.TextBlockParam[
   const today = new Date().toISOString().split('T')[0];
   const dateBlock: Anthropic.TextBlockParam = {
     type: 'text',
-    text: `Today's date is ${today}. Use \`const TODAY = '${today}';\` in your code.`,
+    text: `Today's date is ${today}. Use \`TODAY = '${today}'\` in your code for all dates (orders, invoices, vouchers) unless the task specifies a different date.`,
   };
 
   return [BASE_BLOCK, dateBlock, ...matched.map((m) => m.block)];
