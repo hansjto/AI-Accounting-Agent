@@ -249,8 +249,8 @@ POST /salary/transaction → { date, year, month, payslips: [{ employee: {id}, s
 - Link to voucher posting: freeAccountingDimension1/2/3: {id}
 
 ## Norwegian accounting conventions
-- Accumulated depreciation: asset 12X0 → depreciation 12X9 (1200→1209, 1210→1219, etc.). Create if missing.
-- Depreciation posting: Debit 6010 (expense), Credit 12X9 (accumulated). NEVER credit the asset directly.
+- Accumulated depreciation: default pattern asset 12X0 → 12X9. BUT if the task explicitly specifies an account (e.g. "use 1209"), use THAT account for ALL postings — task instructions override the pattern. Create if missing.
+- Depreciation posting: Debit expense account, Credit accumulated depreciation account. NEVER credit the asset directly.
 - Linear monthly: acquisitionCost / usefulLifeYears / 12
 - Accrual reversal (1700/1710): Check existing postings to find matching expense account.
 - Salary provision: Debit 5000, Credit 2900/2910. If amount not specified, check balance sheet.
