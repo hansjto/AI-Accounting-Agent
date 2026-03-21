@@ -231,6 +231,8 @@ If the compound tool is not available, follow the manual steps below:
    - Row 1: expense account, amount = NET, vatType = incoming VAT {id}
    - Row 2: account 2400, amount = -GROSS, supplier: {id} ← MUST include supplier:{id}!
    Include vendorInvoiceNumber on the voucher.
+   CRITICAL: Set voucherType to Leverandørfaktura — look up with GET /ledger/voucherType?name=Leverandørfaktura
+   Then include voucherType: {id: leverandorTypeId} on the voucher. Without this, the invoice won't be found!
 
 **Supplier invoice actions:**
 - \`api.put('/supplierInvoice/{id}/:approve')\`
@@ -321,12 +323,14 @@ await tripletex_put(f"/invoice/{invoice['id']}/:send", {}, {"sendType": "EMAIL"}
 print(f"Created invoice {invoice['id']}")
 \`\`\`
 
-## Fixed-price project invoicing (a-konto)
-When invoicing a percentage of a fixed-price project budget:
-- The budget amount IS the amount excluding VAT
-- Do NOT add VAT type on the order line unless the task explicitly mentions VAT/MVA
-- Example: "invoice 50% of budget 400000" → unitPriceExcludingVatCurrency = 200000, NO vatType
-- Only add vatType if the task specifically says "with VAT" or "med MVA"
+## Fixed-price project invoicing (a-konto) — CRITICAL
+When creating an invoice for a project (budget/fixed price):
+- NEVER add vatType on the order line — the budget IS the final amount
+- unitPriceExcludingVatCurrency = the budget amount (or percentage of it)
+- If budget=432000 and you invoice 100%: unitPriceExcludingVatCurrency=432000, NO vatType
+- If budget=432000 and you invoice 50%: unitPriceExcludingVatCurrency=216000, NO vatType
+- Adding vatType causes the invoice amount to be 1.25x too high!
+- This applies to ALL project invoices: "Opprett kundefaktura for prosjektet" = invoice the budget, NO VAT
 
 ## Batch endpoints
 await tripletex_post_list("/employee/list", [...]), await tripletex_post_list("/customer/list", [...]),
@@ -419,15 +423,26 @@ const MODULES: Module[] = [
       type: 'text',
       text: `## Bank Reconciliation (loaded dynamically)
 
+**How to reconcile a bank statement CSV:**
+The CSV is appended to the prompt as text. Parse it to get the transactions.
+For each row in the CSV:
+- "Innbetaling fra X / Faktura NNNN" → register payment on customer invoice:
+  1. Find customer by name
+  2. Find their invoice (GET /invoice?customerId={id}&invoiceDateFrom=2020-01-01&invoiceDateTo=2030-01-01)
+  3. Register payment: PUT /invoice/{id}/:payment?paymentTypeId={bankPayTypeId}&paidAmount={amount}&paymentDate={date}
+- "Betaling Leverandor X" → register supplier payment:
+  1. Find supplier by name
+  2. Find their supplier invoice (GET /supplierInvoice?supplierId={id}&invoiceDateFrom=2020-01-01&invoiceDateTo=2030-01-01)
+  3. If found: POST /supplierInvoice/{id}/:addPayment {paymentType: {id: 0}, amount, paymentDate}
+  4. If not found: create a voucher with debit 2400 (AP), credit 1920 (bank)
+- "Renteinntekter" → create voucher: debit 1920 (bank), credit 8040 (renteinntekter)
+- "Bankgebyr" → create voucher: debit 7770 (bankgebyr), credit 1920 (bank)
+- For partial payments: use the CSV amount, not the full invoice amount
+
 **Endpoints:**
-- GET /bank/reconciliation → search: { accountId, isClosed, dateFrom, dateTo, fields }
-- POST /bank/reconciliation → create: { account: {id}, closingDate }
-- PUT /bank/reconciliation/{id} → update
-- PUT /bank/reconciliation/{id}/:adjustment → add manual adjustment: { description, amount, date }
-- GET /bank/reconciliation/>last → latest open reconciliation
-- GET /bank/reconciliation/>lastClosed → last closed reconciliation
-- GET /bank/reconciliation/match → search matches
-- PUT /bank/reconciliation/match/{id} → update match`,
+- GET /invoice/paymentType → find bank payment type (pick "Betalt til bank")
+- GET /supplierInvoice?supplierId={id}&invoiceDateFrom=...&invoiceDateTo=... (BOTH dates REQUIRED)
+- PUT /invoice/{id}/:payment?paymentTypeId&paidAmount&paymentDate (query params, body={})`,
       cache_control: { type: 'ephemeral' },
     },
   },
