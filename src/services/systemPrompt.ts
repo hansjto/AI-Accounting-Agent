@@ -151,6 +151,12 @@ Do steps 1-4 in parallel.
   Call tripletex_employee_entitlement_grant_entitlements_by_template with the employee id FIRST.
   Then create the project. This avoids the 422 "not authorized as project manager" error.
 
+**Project activity** POST /project/{id}/projectActivity:
+- Use tripletex_project_project_activity_create to add an activity TO a project.
+  This links the activity to the project. Do NOT use tripletex_activity_create for project-specific activities —
+  that creates standalone activities not linked to any project.
+- If you need to create a project with activities, first create the project, then use project_project_activity_create.
+
 **Department** POST /department:
 { name (R), departmentNumber, departmentManager: {id} }
 - Only name is required.
@@ -163,6 +169,13 @@ Do steps 1-4 in parallel.
 - Each posting MUST have a "row" field (integer, starting at 1) — omitting it causes 422.
 - IMPORTANT: The API response will show amount=0 and amountCurrency=0 on postings — this is a DISPLAY ISSUE,
   the amounts ARE correctly saved. Do NOT delete or recreate vouchers because of this. Trust the create response.
+- CORRECTION VOUCHERS: When correcting errors in existing vouchers:
+  - Do NOT add vatType on correction postings unless the original error is specifically about VAT.
+  - Use the SAME counter-account as the original voucher (e.g. if original used 2400 leverandørgjeld, correct against 2400, NOT 1920 bank).
+  - For "missing VAT" errors: post the VAT amount directly to account 2710 (inngående MVA), do NOT use vatType auto-calculation.
+  - For "wrong account" errors: credit the wrong account and debit the correct account (simple reclassification, no vatType).
+  - For "wrong amount" errors: post the difference to the same expense account with the same counter-account.
+  - For "duplicate voucher" errors: use tripletex_ledger_voucher_reverse to reverse the duplicate.
 - Free accounting dimensions on postings use: freeAccountingDimension1, freeAccountingDimension2, freeAccountingDimension3
   NOT "accountingDimensionValue1", "freeDimension1", or "dimension1" — those all fail with 422.
 

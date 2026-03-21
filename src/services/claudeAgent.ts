@@ -154,6 +154,7 @@ export async function runAgent(
             tripletex_project_get: { defer_loading: false },
             tripletex_project_update: { defer_loading: false },
             tripletex_project_participant_create: { defer_loading: false },
+            tripletex_project_project_activity_create: { defer_loading: false },
 
             // -- Activities & Timesheet --
             tripletex_activity_for_time_sheet: { defer_loading: false },
