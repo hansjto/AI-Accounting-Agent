@@ -139,13 +139,16 @@ All tools are pre-authenticated. Use them inside code_execution Python code.
   3. Book the exchange rate difference (agio/disagio)
   Only create a new invoice if the task explicitly says to CREATE one.
   For payment at a different rate:
-  1. Register payment: paidAmount = amount_EUR × new_rate
-  2. After payment, GET the invoice to check amountOutstanding
-  3. If amountOutstanding > 0 (disagio) or < 0 (agio), book the difference:
-     - Disagio (loss, rate decreased): debit 8160 (Valutatap), credit 1500 (Kundefordringer) for the outstanding amount
-     - Agio (gain, rate increased): debit 1500, credit 8060 (Valutagevinst)
-     Include customer:{id} on the 1500 posting!
-  4. The invoice should have amountOutstanding = 0 after all postings.
+  1. Calculate: payment_nok = EUR_amount × new_rate, disagio = EUR_amount × (old_rate - new_rate)
+  2. Register payment on EXISTING invoice: paidAmount = invoice's amountCurrency (the full NOK amount)
+     This closes the invoice fully.
+  3. If rate decreased (disagio/loss): create voucher with amountGross:
+     - Debit 8160 (Valutatap): amountGross = +disagio_amount
+     - Credit 1500 (Kundefordringer): amountGross = -disagio_amount, customer: {id}
+  4. If rate increased (agio/gain): create voucher:
+     - Debit 1500: amountGross = +agio_amount, customer: {id}
+     - Credit 8060 (Valutagevinst): amountGross = -agio_amount
+  Use amountGross AND amountGrossCurrency on all postings!
 
 **Foreign currency payment params:**
   For invoices in foreign currency, PUT /invoice/{id}/:payment requires BOTH:
