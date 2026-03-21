@@ -161,6 +161,8 @@ Do steps 1-4 in parallel.
     freeAccountingDimension1: {id}, freeAccountingDimension2: {id}, freeAccountingDimension3: {id} }] }
 - date, description, and postings are all REQUIRED.
 - Each posting MUST have a "row" field (integer, starting at 1) — omitting it causes 422.
+- IMPORTANT: The API response will show amount=0 and amountCurrency=0 on postings — this is a DISPLAY ISSUE,
+  the amounts ARE correctly saved. Do NOT delete or recreate vouchers because of this. Trust the create response.
 - Free accounting dimensions on postings use: freeAccountingDimension1, freeAccountingDimension2, freeAccountingDimension3
   NOT "accountingDimensionValue1", "freeDimension1", or "dimension1" — those all fail with 422.
 
