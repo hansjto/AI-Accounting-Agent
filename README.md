@@ -2,7 +2,7 @@
 
 > **NM i AI 2026** (Norwegian AI Championship) — Task 2: Tripletex Accounting Automation
 >
-> This project was built for the [NM i AI 2026](https://www.norskai.no/) competition, where AI agents solve real-world accounting tasks against the Tripletex ERP system. The agent receives natural language prompts describing accounting tasks and autonomously executes them via the Tripletex API.
+> This project was built for the [NM i AI 2026](https://ainm.no/) competition, where AI agents solve real-world accounting tasks against the Tripletex ERP system. The agent receives natural language prompts describing accounting tasks and autonomously executes them via the Tripletex API.
 
 An LLM-powered service that automates accounting tasks in [Tripletex](https://www.tripletex.no/) via natural language prompts.
 
